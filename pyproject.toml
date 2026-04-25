@@ -7,7 +7,7 @@ name = "eggseis"
 version = "0.1.0.dev0"
 description = "An open-source desktop application for viewing and analyzing seismic data, with a Python plugin system."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Eric Geordi", email = "laforge2001@gmail.com" }]
@@ -17,7 +17,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering",
@@ -53,7 +52,7 @@ packages = ["src/eggseis"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "RUF"]
