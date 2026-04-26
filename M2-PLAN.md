@@ -31,7 +31,7 @@ You're done with M2 when this is true:
 | Qt bindings | PySide6 (LGPL; matches ROADMAP) |
 | 2D rendering | pyqtgraph |
 | Project format | Plain directory, `project.yaml` manifest |
-| Project save | **Out of scope** — open-only in M2; save deferred to M5 |
+| Project save | **Out of scope** — open-only in M2; save deferred to M7 |
 | Threading | **Out of scope** — synchronous render in M2; M4 owns compute/threading |
 | GUI deps | Gated behind `gui` extra so headless CLI stays slim |
 | Headless tests | `pytest-qt` + offscreen platform; no pixel asserts cross-OS |
@@ -117,11 +117,11 @@ name: F3 demo
 surveys:
   - name: F3 fragment
     path: surveys/f3.mdio
-horizons: []   # M5
-wells: []      # M5
+horizons: []   # M7
+wells: []      # M7
 ```
 
-Paths relative to manifest. `horizons` and `wells` keys exist now so M5 doesn't break old projects.
+Paths relative to manifest. `horizons` and `wells` keys exist now so M7 doesn't break old projects.
 
 ## Step 3: Main window + menus
 
@@ -241,8 +241,8 @@ class ProjectTreeWidget(QTreeWidget):
             item.setData(0, 0x100, str(s.path))  # Qt.UserRole == 0x100
             surveys.addChild(item)
         root.addChild(surveys)
-        root.addChild(QTreeWidgetItem(["Horizons"]))  # M5
-        root.addChild(QTreeWidgetItem(["Wells"]))     # M5
+        root.addChild(QTreeWidgetItem(["Horizons"]))  # M7
+        root.addChild(QTreeWidgetItem(["Wells"]))     # M7
         self.addTopLevelItem(root)
         root.setExpanded(True)
         surveys.setExpanded(True)
@@ -635,17 +635,17 @@ Two or three weekends. Don't let any single step block you for more than a few h
 - **pyqtgraph perf on big inlines** — synchronous render is fine for M2; threading lands in M4. If demo data is large enough that synchronous render lags, downsample for display only.
 - **PySide6 wheel size** — keep behind `gui` extra so library users pay nothing.
 - **Image orientation drift** — easy to flip an axis once and never notice. Add an assertion in the smoke test that `section_viewer._image.image.shape` matches the expected `(n_samples, n_xlines)` for an inline.
-- **Volume viewer (M6) will be harder** — PyVista/VTK needs a real GL context. Plan to add `LIBGL_ALWAYS_SOFTWARE=1` then. Not an M2 problem.
+- **Volume viewer (M8) will be harder** — PyVista/VTK needs a real GL context. Plan to add `LIBGL_ALWAYS_SOFTWARE=1` then. Not an M2 problem.
 
 ---
 
 ## Out of scope for M2
 
-- Project save / persistent UI state → M5.
+- Project save / persistent UI state → M7.
 - Threading / debounce / cancellation / cache → M4.
 - Plugin menu, attributes → M3.
-- Volume viewer, crossplot → M6 / M7.
-- Horizon / well overlays → M5.
+- Volume viewer, crossplot → M8 / M9.
+- Horizon / well overlays → M7.
 - Crosshair status-bar readout text — stub the slot, fill in M3 if it's still missing.
 
 ---

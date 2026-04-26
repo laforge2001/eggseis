@@ -95,6 +95,25 @@ A project is any directory containing a `project.yaml` manifest — see `example
 | PgUp / PgDown | Step the current slice by ten |
 | I / X / T | Switch axis to inline / xline / timeslice |
 
+### Plugins (M3)
+
+Trace-local attributes register via `@trace_attribute` and appear in the
+**Attribute** menu. The `Parameters` dock auto-builds sliders from each
+`Param(...)` declaration. See **`docs/plugin-authoring.md`** for the full
+reference, parameter widget rules, examples, and troubleshooting.
+
+Quick checks:
+
+```bash
+eggseis plugins              # list discovered plugins + their source paths
+eggseis plugins --params     # also show parameter declarations
+```
+
+Discovery sources, in order: built-ins → `$EGGSEIS_PLUGIN_PATH` (os.pathsep-
+separated) → `~/.eggseis/plugins/` → installed `eggseis.plugins` entry points.
+**File → New Plugin…** in the GUI writes a starter file under
+`~/.eggseis/plugins/` and opens it in your editor.
+
 ## Continuous integration
 
 Every push to a PR runs `.github/workflows/tests.yml` across:
