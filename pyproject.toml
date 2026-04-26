@@ -73,3 +73,6 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # allow en-dash, ×, etc. in user-facin
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --strict-markers"
+filterwarnings = [
+    "ignore:The numcodecs.zarr3 module is deprecated:DeprecationWarning",
+]

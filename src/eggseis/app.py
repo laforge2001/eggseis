@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QSplitter
 
 from eggseis.backends.mdio import MDIOBackend
@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         self._project: Project | None = None
         self._build_menus()
         self._wire_signals()
+        self._build_shortcuts()
 
     def _build_menus(self) -> None:
         m_file = self.menuBar().addMenu("&File")
@@ -66,9 +67,24 @@ class MainWindow(QMainWindow):
         m_help = self.menuBar().addMenu("&Help")
         m_help.addAction(QAction("&About", self))
 
+    def _build_shortcuts(self) -> None:
+        bindings = (
+            ("Left", lambda: self.slice_nav.step(-1)),
+            ("Right", lambda: self.slice_nav.step(+1)),
+            ("PgUp", lambda: self.slice_nav.step(-10)),
+            ("PgDown", lambda: self.slice_nav.step(+10)),
+            ("I", lambda: self.slice_nav.set_axis("inline")),
+            ("X", lambda: self.slice_nav.set_axis("xline")),
+            ("T", lambda: self.slice_nav.set_axis("timeslice")),
+        )
+        for keys, slot in bindings:
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.activated.connect(slot)
+
     def _wire_signals(self) -> None:
         self.tree.surveyActivated.connect(self.open_survey)
         self.slice_nav.sliceChanged.connect(self.section_viewer.show_slice)
+        self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
 
     def _on_open_project(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Open Project")

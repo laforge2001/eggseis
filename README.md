@@ -101,7 +101,11 @@ It's also useful for academic researchers, consultants, and independent geophysi
 
 ## Status
 
-eggseis is in **pre-alpha** development. The design is settled; the code is being written. The roadmap is:
+eggseis is in **pre-alpha** development. The design is settled; the code is being written.
+
+![M2 section viewer](docs/m2-screenshot.png)
+
+The roadmap is:
 
 - **M1** — Data layer + CLI *(complete, [v0.1.0a1](CHANGELOG.md))*
 - **M2–M4** — Section viewer, plugin API, compute engine *(in progress)*

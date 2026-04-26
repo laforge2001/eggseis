@@ -40,6 +40,7 @@ PySide6 is a ~500 MB download — first install is slow.
 | `./scripts/test.sh nogui` | Everything except the GUI smoke test. |
 | `./scripts/test.sh lint` | `ruff check .` |
 | `./scripts/test.sh ci` | Lint + full headless suite. Mirrors GitHub Actions. |
+| `./scripts/test.sh shot` | Regenerate `docs/m2-screenshot.png` from the demo project. |
 
 Anything after the command forwards to pytest:
 
@@ -76,6 +77,14 @@ eggseis gui /path/to/your/project/
 ```
 
 A project is any directory containing a `project.yaml` manifest — see `examples/demo-project/project.yaml` for the minimum schema.
+
+### Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| ← / → | Step the current slice by one |
+| PgUp / PgDown | Step the current slice by ten |
+| I / X / T | Switch axis to inline / xline / timeslice |
 
 ## Continuous integration
 

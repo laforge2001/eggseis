@@ -57,3 +57,15 @@ class SliceNavigator(QWidget):
     def _emit_change(self) -> None:
         if self._geom is not None:
             self.sliceChanged.emit(self.axis.currentText(), self.spinbox.value())
+
+    def step(self, direction: int) -> None:
+        """Move the spinbox by `direction * singleStep`. Clamped to range."""
+        if not self.spinbox.isEnabled():
+            return
+        new_val = self.spinbox.value() + direction * self.spinbox.singleStep()
+        new_val = max(self.spinbox.minimum(), min(self.spinbox.maximum(), new_val))
+        self.spinbox.setValue(new_val)
+
+    def set_axis(self, axis: str) -> None:
+        if axis in AXES:
+            self.axis.setCurrentText(axis)

@@ -11,6 +11,7 @@
 #   gui       run only the GUI smoke tests headlessly
 #   nogui     run everything except the GUI smoke tests
 #   demo      launch the eggseis GUI against examples/demo-project/
+#   shot      regenerate docs/m2-screenshot.png from the demo project
 #   ci        lint + full headless suite (mirrors GitHub Actions)
 #   help      print this message
 
@@ -50,6 +51,9 @@ case "$cmd" in
         ;;
     demo)
         eggseis gui examples/demo-project "$@"
+        ;;
+    shot)
+        python scripts/screenshot.py "$@"
         ;;
     ci)
         ruff check .
