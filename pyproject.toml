@@ -32,11 +32,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gui = [
+    "pyside6>=6.6",
+    "pyqtgraph>=0.13",
+    "pyyaml>=6.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-qt>=4.4",
     "ruff>=0.6",
     "mypy>=1.10",
+    "eggseis[gui]",
 ]
 
 [project.scripts]
@@ -60,7 +67,12 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # allow en-dash, ×, etc. in user-facin
 
 [tool.ruff.lint.per-file-ignores]
 "src/eggseis/cli.py" = ["B008"]  # typer.Argument/Option in defaults is idiomatic
+"src/eggseis/widgets/*.py" = ["N815"]  # Qt signals are camelCase by convention
+"src/eggseis/viewers/*.py" = ["N815"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning:numcodecs",
+]

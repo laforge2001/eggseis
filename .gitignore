@@ -59,4 +59,5 @@ scratch/
 tests/data/*.mdio/
 tests/data/*.segy
 *.png
+!docs/*.png
 /demo.mdio/

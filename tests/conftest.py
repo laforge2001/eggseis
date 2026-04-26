@@ -96,3 +96,24 @@ def sample_mdio_path(tmp_path_factory) -> Path:
     path = tmp_path_factory.mktemp("mdio") / "synth.mdio"
     _build_synthetic_mdio(path)
     return path
+
+
+@pytest.fixture(scope="session")
+def demo_project_path(tmp_path_factory, sample_mdio_path) -> Path:
+    """A demo project layout pointing at the synthetic MDIO fixture."""
+    import shutil
+
+    root = tmp_path_factory.mktemp("project")
+    surveys = root / "surveys"
+    surveys.mkdir()
+    target = surveys / "synth.mdio"
+    shutil.copytree(sample_mdio_path, target)
+    (root / "project.yaml").write_text(
+        "name: demo\n"
+        "surveys:\n"
+        "  - name: synth\n"
+        "    path: surveys/synth.mdio\n"
+        "horizons: []\n"
+        "wells: []\n"
+    )
+    return root

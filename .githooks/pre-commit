@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Pre-commit hook: regenerate docs/m2-screenshot.png when UI sources change.
+#
+# Triggers regeneration only if the commit touches anything that could change
+# what the section viewer paints. If PySide6 isn't importable (e.g. on a
+# library-only checkout), the hook skips silently rather than blocking.
+#
+# Install once per clone:
+#   git config core.hooksPath .githooks
+# Or run:
+#   ./scripts/test.sh setup-hooks
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+# Files whose changes can affect the rendered screenshot.
+TRIGGERS=(
+    "src/eggseis/app.py"
+    "src/eggseis/viewers/"
+    "src/eggseis/widgets/"
+    "src/eggseis/colormaps.py"
+    "src/eggseis/axes.py"
+    "examples/demo-project/"
+    "scripts/screenshot.py"
+)
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+match=""
+for trigger in "${TRIGGERS[@]}"; do
+    if grep -q -F "$trigger" <<<"$staged"; then
+        match="$trigger"
+        break
+    fi
+done
+
+if [[ -z "$match" ]]; then
+    exit 0
+fi
+
+# Auto-activate venv if present.
+if [[ -z "${VIRTUAL_ENV:-}" && -f .venv/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+fi
+
+# Skip silently if GUI deps aren't installed.
+if ! python -c "import PySide6, pyqtgraph, yaml" >/dev/null 2>&1; then
+    echo "pre-commit: PySide6 not available, skipping screenshot regeneration" >&2
+    exit 0
+fi
+
+echo "pre-commit: UI source touched ($match), regenerating docs/m2-screenshot.png"
+python scripts/screenshot.py >/dev/null
+git add docs/m2-screenshot.png

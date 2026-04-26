@@ -67,5 +67,31 @@ def dump_inline(
     )
 
 
+@app.command()
+def gui(
+    project_dir: Path | None = typer.Argument(
+        None, help="Optional project directory to open on launch"
+    ),
+) -> None:
+    """Launch the eggseis GUI."""
+    import sys
+
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError as exc:
+        raise typer.BadParameter(
+            "GUI dependencies not installed. Install with: pip install 'eggseis[gui]'"
+        ) from exc
+
+    from eggseis.app import MainWindow
+
+    qt_app = QApplication.instance() or QApplication(sys.argv)
+    win = MainWindow()
+    if project_dir is not None:
+        win.open_project(project_dir)
+    win.show()
+    sys.exit(qt_app.exec())
+
+
 if __name__ == "__main__":
     app()

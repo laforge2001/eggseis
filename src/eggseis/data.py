@@ -7,6 +7,8 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from eggseis.axes import Axis
+
 
 @dataclass(frozen=True)
 class SurveyGeometry:
@@ -37,6 +39,24 @@ class SurveyGeometry:
     @property
     def time_max_ms(self) -> float:
         return (self.n_samples - 1) * self.sample_rate_ms
+
+    def inline_at(self, idx: int) -> int:
+        return self.inline_min + idx * self.inline_step
+
+    def xline_at(self, idx: int) -> int:
+        return self.xline_min + idx * self.xline_step
+
+    def time_at(self, sample: int) -> float:
+        return sample * self.sample_rate_ms
+
+    def range_for(self, axis: Axis | str) -> tuple[int, int, int]:
+        """Return (lo, hi, step) for the given axis, suitable for spinbox bounds."""
+        axis = Axis(axis)
+        if axis is Axis.INLINE:
+            return self.inline_min, self.inline_max, self.inline_step
+        if axis is Axis.XLINE:
+            return self.xline_min, self.xline_max, self.xline_step
+        return 0, self.n_samples - 1, 1
 
 
 @runtime_checkable
