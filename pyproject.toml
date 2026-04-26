@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eggseis"
+version = "0.1.0.dev0"
+description = "An open-source desktop application for viewing and analyzing seismic data, with a Python plugin system."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Eric Geordi", email = "laforge2001@gmail.com" }]
+keywords = ["seismic", "geoscience", "geophysics", "interpretation", "segy", "mdio"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "multidimio>=1.1",
+    "typer>=0.12",
+    "rich>=13.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+eggseis = "eggseis.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/eggseis/eggseis"
+Repository = "https://github.com/eggseis/eggseis"
+Issues = "https://github.com/eggseis/eggseis/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eggseis"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # allow en-dash, ×, etc. in user-facing strings
+
+[tool.ruff.lint.per-file-ignores]
+"src/eggseis/cli.py" = ["B008"]  # typer.Argument/Option in defaults is idiomatic
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --strict-markers"
