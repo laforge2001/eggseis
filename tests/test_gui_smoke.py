@@ -8,14 +8,10 @@ Runs under QT_QPA_PLATFORM=offscreen — no display server required.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 

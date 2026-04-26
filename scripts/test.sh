@@ -10,7 +10,7 @@
 #   test      run the full pytest suite headlessly (default)
 #   gui       run only the GUI smoke tests headlessly
 #   nogui     run everything except the GUI smoke tests
-#   visible   run GUI tests with real Qt windows (no offscreen platform)
+#   demo      launch the eggseis GUI against examples/demo-project/
 #   ci        lint + full headless suite (mirrors GitHub Actions)
 #   help      print this message
 
@@ -48,8 +48,8 @@ case "$cmd" in
     nogui)
         pytest --ignore=tests/test_gui_smoke.py "$@"
         ;;
-    visible)
-        pytest tests/test_gui_smoke.py -v "$@"
+    demo)
+        eggseis gui examples/demo-project "$@"
         ;;
     ci)
         ruff check .

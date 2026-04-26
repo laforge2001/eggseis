@@ -1,0 +1,6 @@
+name: eggseis demo
+surveys:
+  - name: demo
+    path: ../../demo.mdio
+horizons: []
+wells: []
