@@ -7,10 +7,13 @@ import pyqtgraph as pg
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from eggseis.axes import Axis
 from eggseis.colormaps import get_lut
 from eggseis.data import SeismicVolume
 
 DEFAULT_LUT = "gray"
+_MOUSE_RATE_HZ = 60
+_PERCENTILE_SUBSAMPLE = 8  # stride into raveled slice when estimating 1/99 percentiles
 
 
 class SectionViewer(QWidget):
@@ -26,22 +29,25 @@ class SectionViewer(QWidget):
         self._plot.invertY(True)
         self._image = pg.ImageItem(axisOrder="row-major")
         self._plot.addItem(self._image)
+        self._vb = self._plot.getPlotItem().vb
         layout.addWidget(self._plot)
 
         self._volume: SeismicVolume | None = None
         self._lut_name = DEFAULT_LUT
         self._image.setLookupTable(get_lut(self._lut_name))
-        self._axis: str = "inline"
+        self._axis: Axis = Axis.INLINE
         self._index: int = 0
-        self._array: np.ndarray | None = None
+        self._last_emit_key: tuple | None = None
 
         self._proxy = pg.SignalProxy(
-            self._plot.scene().sigMouseMoved, rateLimit=60, slot=self._on_mouse_moved
+            self._plot.scene().sigMouseMoved,
+            rateLimit=_MOUSE_RATE_HZ,
+            slot=self._on_mouse_moved,
         )
 
     @property
     def current_axis(self) -> str:
-        return self._axis
+        return self._axis.value
 
     @property
     def current_index(self) -> int:
@@ -57,14 +63,12 @@ class SectionViewer(QWidget):
 
     def set_volume(self, volume: SeismicVolume) -> None:
         self._volume = volume
-        self._axis = "inline"
+        self._axis = Axis.INLINE
         self._index = volume.geometry.inline_min
         self._render()
 
     def show_slice(self, axis: str, index: int) -> None:
-        if axis not in ("inline", "xline", "timeslice"):
-            raise ValueError(f"Unknown axis {axis!r}")
-        self._axis = axis
+        self._axis = Axis(axis)
         self._index = index
         self._render()
 
@@ -75,48 +79,57 @@ class SectionViewer(QWidget):
     def _render(self) -> None:
         if self._volume is None:
             return
-        if self._axis == "inline":
+        if self._axis is Axis.INLINE:
             arr = self._volume.read_inline(self._index).T
-        elif self._axis == "xline":
+        elif self._axis is Axis.XLINE:
             arr = self._volume.read_xline(self._index).T
         else:
             arr = self._volume.read_timeslice(self._index)
-        self._array = arr
-        p_low, p_high = np.percentile(arr, [1, 99])
+        sample = arr.ravel()[::_PERCENTILE_SUBSAMPLE]
+        p_low, p_high = np.percentile(sample, [1, 99])
         if p_high == p_low:
             p_high = p_low + 1.0
         self._image.setImage(arr, levels=(float(p_low), float(p_high)))
 
     def _on_mouse_moved(self, evt) -> None:
-        if self._volume is None or self._array is None:
+        if self._volume is None:
+            return
+        arr = self._image.image
+        if arr is None:
             return
         scene_pos = evt[0]
-        view_box = self._plot.getPlotItem().vb
-        if view_box is None or not self._plot.sceneBoundingRect().contains(scene_pos):
+        if not self._plot.sceneBoundingRect().contains(scene_pos):
             return
-        view_pt = view_box.mapSceneToView(scene_pos)
+        view_pt = self._vb.mapSceneToView(scene_pos)
         x = round(view_pt.x())
         y = round(view_pt.y())
 
-        h, w = self._array.shape
+        h, w = arr.shape
         if not (0 <= x < w and 0 <= y < h):
             return
 
-        g = self._volume.geometry
-        amp = float(self._array[y, x])
+        key = (self._axis, self._index, x, y)
+        if key == self._last_emit_key:
+            return
+        self._last_emit_key = key
 
-        if self._axis == "inline":
-            xl = g.xline_min + x * g.xline_step
-            t_ms = y * g.sample_rate_ms
-            text = f"Inline {self._index}  Xline {xl}  Time {t_ms:.1f} ms  Amp {amp:.4g}"
-        elif self._axis == "xline":
-            il = g.inline_min + x * g.inline_step
-            t_ms = y * g.sample_rate_ms
-            text = f"Xline {self._index}  Inline {il}  Time {t_ms:.1f} ms  Amp {amp:.4g}"
+        g = self._volume.geometry
+        amp = float(arr[y, x])
+
+        if self._axis is Axis.INLINE:
+            text = (
+                f"Inline {self._index}  Xline {g.xline_at(x)}  "
+                f"Time {g.time_at(y):.1f} ms  Amp {amp:.4g}"
+            )
+        elif self._axis is Axis.XLINE:
+            text = (
+                f"Xline {self._index}  Inline {g.inline_at(x)}  "
+                f"Time {g.time_at(y):.1f} ms  Amp {amp:.4g}"
+            )
         else:
-            il = g.inline_min + y * g.inline_step
-            xl = g.xline_min + x * g.xline_step
-            t_ms = self._index * g.sample_rate_ms
-            text = f"Time {t_ms:.1f} ms  Inline {il}  Xline {xl}  Amp {amp:.4g}"
+            text = (
+                f"Time {g.time_at(self._index):.1f} ms  "
+                f"Inline {g.inline_at(y)}  Xline {g.xline_at(x)}  Amp {amp:.4g}"
+            )
 
         self.cursorMoved.emit(text)

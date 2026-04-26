@@ -5,13 +5,12 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSpinBox, QWidget
 
+from eggseis.axes import AXES
 from eggseis.data import SurveyGeometry
-
-AXES: tuple[str, ...] = ("inline", "xline", "timeslice")
 
 
 class SliceNavigator(QWidget):
-    sliceChanged = Signal(str, int)  # axis, index
+    sliceChanged = Signal(str, int)
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,13 +39,7 @@ class SliceNavigator(QWidget):
     def _on_axis_changed(self, axis: str) -> None:
         if self._geom is None:
             return
-        g = self._geom
-        if axis == "inline":
-            lo, hi, step = g.inline_min, g.inline_max, g.inline_step
-        elif axis == "xline":
-            lo, hi, step = g.xline_min, g.xline_max, g.xline_step
-        else:
-            lo, hi, step = 0, g.n_samples - 1, 1
+        lo, hi, step = self._geom.range_for(axis)
         self.spinbox.blockSignals(True)
         self.spinbox.setRange(lo, hi)
         self.spinbox.setSingleStep(step)
@@ -59,12 +52,10 @@ class SliceNavigator(QWidget):
             self.sliceChanged.emit(self.axis.currentText(), self.spinbox.value())
 
     def step(self, direction: int) -> None:
-        """Move the spinbox by `direction * singleStep`. Clamped to range."""
+        """Move the spinbox by `direction * singleStep`. QSpinBox clamps to range."""
         if not self.spinbox.isEnabled():
             return
-        new_val = self.spinbox.value() + direction * self.spinbox.singleStep()
-        new_val = max(self.spinbox.minimum(), min(self.spinbox.maximum(), new_val))
-        self.spinbox.setValue(new_val)
+        self.spinbox.setValue(self.spinbox.value() + direction * self.spinbox.singleStep())
 
     def set_axis(self, axis: str) -> None:
         if axis in AXES:

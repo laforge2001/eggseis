@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
 from PySide6.QtWidgets import QFileDialog, QMainWindow, QSplitter
 
+from eggseis.axes import Axis
 from eggseis.backends.mdio import MDIOBackend
 from eggseis.colormaps import LUTS_AVAILABLE
 from eggseis.data import SeismicVolume
@@ -15,6 +16,8 @@ from eggseis.project import Project
 from eggseis.viewers.section import DEFAULT_LUT, SectionViewer
 from eggseis.widgets.project_tree import ProjectTreeWidget
 from eggseis.widgets.slice_nav import SliceNavigator
+
+_BIG_STEP = 10
 
 
 class MainWindow(QMainWindow):
@@ -71,11 +74,11 @@ class MainWindow(QMainWindow):
         bindings = (
             ("Left", lambda: self.slice_nav.step(-1)),
             ("Right", lambda: self.slice_nav.step(+1)),
-            ("PgUp", lambda: self.slice_nav.step(-10)),
-            ("PgDown", lambda: self.slice_nav.step(+10)),
-            ("I", lambda: self.slice_nav.set_axis("inline")),
-            ("X", lambda: self.slice_nav.set_axis("xline")),
-            ("T", lambda: self.slice_nav.set_axis("timeslice")),
+            ("PgUp", lambda: self.slice_nav.step(-_BIG_STEP)),
+            ("PgDown", lambda: self.slice_nav.step(+_BIG_STEP)),
+            ("I", lambda: self.slice_nav.set_axis(Axis.INLINE)),
+            ("X", lambda: self.slice_nav.set_axis(Axis.XLINE)),
+            ("T", lambda: self.slice_nav.set_axis(Axis.TIMESLICE)),
         )
         for keys, slot in bindings:
             sc = QShortcut(QKeySequence(keys), self)
@@ -85,6 +88,10 @@ class MainWindow(QMainWindow):
         self.tree.surveyActivated.connect(self.open_survey)
         self.slice_nav.sliceChanged.connect(self.section_viewer.show_slice)
         self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
+
+    @property
+    def project(self) -> Project | None:
+        return self._project
 
     def _on_open_project(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Open Project")

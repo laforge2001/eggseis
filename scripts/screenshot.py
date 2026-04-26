@@ -20,6 +20,7 @@ from eggseis.app import MainWindow
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_PROJECT = ROOT / "examples" / "demo-project"
 OUTPUT = ROOT / "docs" / "m2-screenshot.png"
+_PAINT_DELAY_MS = 200
 
 
 def main() -> int:
@@ -28,21 +29,19 @@ def main() -> int:
     win.resize(1280, 800)
     win.open_project(DEMO_PROJECT)
 
-    project = win._project  # type: ignore[attr-defined]
-    if not project or not project.surveys:
+    if not win.project or not win.project.surveys:
         print("demo project has no surveys", file=sys.stderr)
         return 1
-    win.open_survey(project.surveys[0].path)
+    win.open_survey(win.project.surveys[0].path)
     win.show()
 
-    # let Qt lay out and paint at least one frame before grabbing
     def grab() -> None:
         OUTPUT.parent.mkdir(parents=True, exist_ok=True)
         win.grab().save(str(OUTPUT))
         print(f"wrote {OUTPUT.relative_to(ROOT)}")
         app.quit()
 
-    QTimer.singleShot(200, grab)
+    QTimer.singleShot(_PAINT_DELAY_MS, grab)
     return app.exec()
 
 
