@@ -30,6 +30,14 @@ That runs `pip install -e ".[dev]"`, which pulls in:
 
 PySide6 is a ~500 MB download — first install is slow.
 
+**Recommended:** also enable the project's git hooks so the section-viewer screenshot in `docs/m2-screenshot.png` regenerates automatically whenever you commit a change to UI sources, the demo project, or the screenshot script:
+
+```bash
+./scripts/test.sh hooks
+```
+
+That just runs `git config core.hooksPath .githooks`. The hook skips silently if PySide6 isn't installed, so it never blocks a library-only checkout.
+
 ## Running tests
 
 | Command | What it runs |
@@ -41,6 +49,7 @@ PySide6 is a ~500 MB download — first install is slow.
 | `./scripts/test.sh lint` | `ruff check .` |
 | `./scripts/test.sh ci` | Lint + full headless suite. Mirrors GitHub Actions. |
 | `./scripts/test.sh shot` | Regenerate `docs/m2-screenshot.png` from the demo project. |
+| `./scripts/test.sh hooks` | Point git at `.githooks/` so the screenshot auto-regenerates on UI commits. |
 
 Anything after the command forwards to pytest:
 

@@ -12,6 +12,7 @@
 #   nogui     run everything except the GUI smoke tests
 #   demo      launch the eggseis GUI against examples/demo-project/
 #   shot      regenerate docs/m2-screenshot.png from the demo project
+#   hooks     point git at .githooks/ so the screenshot auto-regenerates
 #   ci        lint + full headless suite (mirrors GitHub Actions)
 #   help      print this message
 
@@ -54,6 +55,10 @@ case "$cmd" in
         ;;
     shot)
         python scripts/screenshot.py "$@"
+        ;;
+    hooks)
+        git config core.hooksPath .githooks
+        echo "git hooks now resolve from .githooks/"
         ;;
     ci)
         ruff check .
