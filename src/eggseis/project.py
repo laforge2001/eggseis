@@ -31,8 +31,17 @@ class Project:
         if "name" not in data:
             raise ValueError(f"project.yaml missing required key 'name': {manifest}")
 
-        surveys = tuple(
-            SurveyEntry(name=s["name"], path=(root / s["path"]).resolve())
-            for s in data.get("surveys", [])
-        )
-        return cls(name=data["name"], root=root, surveys=surveys)
+        surveys: list[SurveyEntry] = []
+        for s in data.get("surveys", []):
+            if "name" not in s:
+                raise ValueError(f"survey entry missing 'name': {s}")
+            if "path" not in s:
+                raise ValueError(f"survey entry missing 'path': {s}")
+            survey_path = (root / s["path"]).resolve()
+            if not survey_path.exists():
+                raise FileNotFoundError(
+                    f"survey {s['name']!r} path does not exist: {survey_path}"
+                )
+            surveys.append(SurveyEntry(name=s["name"], path=survey_path))
+
+        return cls(name=data["name"], root=root, surveys=tuple(surveys))

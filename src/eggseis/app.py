@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QSplitter
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QMessageBox, QSplitter
 
 from eggseis.axes import Axis
 from eggseis.backends.mdio import MDIOBackend
@@ -95,8 +95,12 @@ class MainWindow(QMainWindow):
 
     def _on_open_project(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Open Project")
-        if d:
+        if not d:
+            return
+        try:
             self.open_project(Path(d))
+        except (FileNotFoundError, ValueError) as exc:
+            QMessageBox.critical(self, "Open Project failed", str(exc))
 
     def open_project(self, path: str | Path) -> None:
         self._project = Project.load(path)

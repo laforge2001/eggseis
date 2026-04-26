@@ -17,7 +17,7 @@ class SliceNavigator(QWidget):
         layout = QHBoxLayout(self)
 
         self.axis = QComboBox()
-        self.axis.addItems(AXES)
+        self.axis.addItems(list(AXES))
         self.spinbox = QSpinBox()
         self.spinbox.setEnabled(False)
 
@@ -58,5 +58,8 @@ class SliceNavigator(QWidget):
         self.spinbox.setValue(self.spinbox.value() + direction * self.spinbox.singleStep())
 
     def set_axis(self, axis: str) -> None:
-        if axis in AXES:
-            self.axis.setCurrentText(axis)
+        if axis not in AXES:
+            raise ValueError(f"Unknown axis {axis!r}; expected one of {AXES}")
+        if self._geom is None:
+            return  # shortcuts may fire before any project is loaded
+        self.axis.setCurrentText(axis)

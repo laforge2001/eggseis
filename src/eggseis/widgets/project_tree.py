@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
 from eggseis.project import Project
 
-_PATH_ROLE = Qt.UserRole
+_PATH_ROLE = Qt.ItemDataRole.UserRole
 
 
 class ProjectTreeWidget(QTreeWidget):

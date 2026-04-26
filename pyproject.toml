@@ -74,5 +74,5 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # allow en-dash, ×, etc. in user-facin
 testpaths = ["tests"]
 addopts = "-v --strict-markers"
 filterwarnings = [
-    "ignore:The numcodecs.zarr3 module is deprecated:DeprecationWarning",
+    "ignore::DeprecationWarning:numcodecs",
 ]

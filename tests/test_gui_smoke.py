@@ -37,7 +37,8 @@ def test_open_project_and_swap_slice(qtbot, demo_project_path):
     win.tree.itemDoubleClicked.emit(survey_item, 0)
     qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
 
-    g = win.section_viewer._volume.geometry  # type: ignore[union-attr]
+    g = win.section_viewer.geometry
+    assert g is not None
     img = win.section_viewer._image.image
     assert img.shape == (g.n_samples, g.n_xlines), (
         f"inline view should be (n_samples={g.n_samples}, n_xlines={g.n_xlines}), "

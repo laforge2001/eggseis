@@ -61,15 +61,21 @@ class SectionViewer(QWidget):
     def has_volume(self) -> bool:
         return self._volume is not None
 
+    @property
+    def geometry(self):
+        return self._volume.geometry if self._volume else None
+
     def set_volume(self, volume: SeismicVolume) -> None:
         self._volume = volume
         self._axis = Axis.INLINE
         self._index = volume.geometry.inline_min
+        self._last_emit_key = None
         self._render()
 
-    def show_slice(self, axis: str, index: int) -> None:
+    def show_slice(self, axis: Axis | str, index: int) -> None:
         self._axis = Axis(axis)
         self._index = index
+        self._last_emit_key = None
         self._render()
 
     def set_colormap(self, name: str) -> None:
@@ -98,8 +104,6 @@ class SectionViewer(QWidget):
         if arr is None:
             return
         scene_pos = evt[0]
-        if not self._plot.sceneBoundingRect().contains(scene_pos):
-            return
         view_pt = self._vb.mapSceneToView(scene_pos)
         x = round(view_pt.x())
         y = round(view_pt.y())
