@@ -152,7 +152,7 @@ Beyond that:
 - **Improve the docs** — the tutorial, the plugin author guide, the API reference. These are the first impression for everyone after you.
 - **Ship a plugin package to PyPI** and we'll link to it from the plugin registry.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the details. Code is contributed under Apache 2.0; we use a lightweight Contributor License Agreement that preserves the project's ability to evolve over time.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the details. Code is contributed under Apache 2.0; we use a lightweight Contributor License Agreement that preserves the project's ability to evolve over time. For local dev setup, the test runner, and the headless GUI workflow, see [docs/development.md](docs/development.md).
 
 ## Community
 
