@@ -103,7 +103,8 @@ It's also useful for academic researchers, consultants, and independent geophysi
 
 eggseis is in **pre-alpha** development. The design is settled; the code is being written. The roadmap is:
 
-- **M1–M4** — Data layer, section viewer, plugin API, compute engine *(in progress)*
+- **M1** — Data layer + CLI *(complete, [v0.1.0a1](CHANGELOG.md))*
+- **M2–M4** — Section viewer, plugin API, compute engine *(in progress)*
 - **M5–M7** — Horizons and wells, volume viewer, crossplot
 - **M8** — Private alpha with early users
 - **M9** — v1.0 public release
