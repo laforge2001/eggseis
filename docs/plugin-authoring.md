@@ -189,9 +189,12 @@ Don't pre-optimize for them in your plugin code.
 **Slider feels too coarse.** Set `step=` on the Param, or rely on the
 auto-derived `(max-min)/1000` for floats with both bounds.
 
-**Plugin "does nothing" visually.** The section viewer percentile-stretches
-every paint. Linear gain × percentile = no-op. Use a plugin whose output
-*shape* differs from raw amplitude (envelope, clip, bandpass).
+**Plugin output range very different from raw (e.g. envelope is non-negative).**
+By default `View → Lock Levels to Raw` is **on**, which paints overlays against
+the raw slice's percentile range so amplitude-changing plugins (gain, clip)
+behave intuitively. For plugins whose output lives on a different scale
+(envelope, instantaneous frequency), turn this off to let the viewer
+auto-stretch the overlay.
 
 **`filtfilt` raises `ValueError: padlen ...`.** Your filter taps exceed
 `(n_samples - 1) / 3`. Clamp `n_taps` and pass an explicit

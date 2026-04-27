@@ -92,6 +92,11 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _checked, n=name: self.set_colormap(n))
             self._cmap_group.addAction(a)
             cmap_menu.addAction(a)
+        m_view.addSeparator()
+        self._lock_levels_action = QAction("&Lock Levels to Raw", self, checkable=True)
+        self._lock_levels_action.setChecked(self.section_viewer.levels_locked)
+        self._lock_levels_action.toggled.connect(self.section_viewer.set_levels_locked)
+        m_view.addAction(self._lock_levels_action)
 
         m_attr = self.menuBar().addMenu("&Attribute")
         self._attr_group = QActionGroup(self)
