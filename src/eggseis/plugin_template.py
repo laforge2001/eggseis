@@ -13,9 +13,8 @@ from eggseis.plugin_loader import USER_PLUGIN_DIR
 TEMPLATE = '''\
 """User plugin: {display}.
 
-Drop this file in {dir}/ and restart eggseis.
 Each parameter must use a Param(...) default; the GUI builds sliders
-automatically from the bounds.
+automatically from the bounds. Restart eggseis to register changes.
 """
 
 from __future__ import annotations
@@ -54,7 +53,7 @@ def create_template(name: str, target_dir: Path | None = None) -> Path:
     target = directory / f"{func}.py"
     if target.exists():
         raise FileExistsError(target)
-    target.write_text(TEMPLATE.format(display=name, dir=directory, func=func))
+    target.write_text(TEMPLATE.format(display=name, func=func))
     return target
 
 

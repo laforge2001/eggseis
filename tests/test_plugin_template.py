@@ -44,6 +44,17 @@ def test_create_template_existing_file_raises(tmp_path):
         create_template("X", target_dir=tmp_path)
 
 
+def test_template_does_not_embed_target_path(tmp_path):
+    """Regression: paths with backslashes (Windows) used to break docstrings."""
+    path = create_template("Round Trip", target_dir=tmp_path)
+    content = path.read_text()
+    assert str(tmp_path) not in content
+    # `\U`, `\N`, `\x` etc. are unicode-escape sequences; the docstring
+    # must not contain a path that introduces them.
+    assert "\\U" not in content
+    assert "\\N" not in content
+
+
 def test_template_imports_and_registers(tmp_path):
     """The generated file must be valid Python and register a plugin."""
     path = create_template("Round Trip", target_dir=tmp_path)
