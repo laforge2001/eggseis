@@ -130,6 +130,12 @@ class MainWindow(QMainWindow):
             a_errors.setText(f"&Plugin Errors… ({len(self._plugin_load_errors)})")
         self._plugin_errors_action = a_errors
         m_help.addAction(a_errors)
+
+        a_compute_errors = QAction("&Compute Errors…", self)
+        a_compute_errors.triggered.connect(self._on_show_compute_errors)
+        m_help.addAction(a_compute_errors)
+        self._compute_errors_action = a_compute_errors
+
         if self._plugin_load_errors:
             # Surface a transient hint so users don't miss it.
             self.statusBar().showMessage(
@@ -184,6 +190,20 @@ class MainWindow(QMainWindow):
         box.setWindowTitle("Plugin Errors")
         box.setIcon(QMessageBox.Warning)
         box.setText(f"{len(self._plugin_load_errors)} plugin(s) failed to load:")
+        box.setDetailedText(body)
+        box.exec()
+
+    def _on_show_compute_errors(self) -> None:
+        if not self._compute_errors:
+            QMessageBox.information(
+                self, "Compute Errors", "No compute errors recorded this session."
+            )
+            return
+        body = "\n\n".join(f"• {name}\n    {msg}" for name, msg in self._compute_errors)
+        box = QMessageBox(self)
+        box.setWindowTitle("Compute Errors")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(f"{len(self._compute_errors)} compute error(s) this session:")
         box.setDetailedText(body)
         box.exec()
 
