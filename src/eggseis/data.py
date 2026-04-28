@@ -74,6 +74,9 @@ class SeismicBackend(Protocol):
     def read_timeslice(self, sample_index: int) -> np.ndarray: ...
     def read_trace(self, inline: int, xline: int) -> np.ndarray: ...
 
+    @property
+    def version(self) -> tuple: ...
+
 
 class SeismicVolume:
     """Stable public abstraction for a 3D seismic volume.
@@ -98,6 +101,11 @@ class SeismicVolume:
     @property
     def dtype(self) -> np.dtype:
         return self._backend.dtype
+
+    @property
+    def version(self) -> tuple:
+        """Opaque tuple uniquely identifying this volume's bytes (cache key input)."""
+        return self._backend.version
 
     def read_inline(self, inline: int) -> np.ndarray:
         """Read single inline as shape (n_xlines, n_samples)."""

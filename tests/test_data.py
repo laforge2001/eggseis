@@ -112,3 +112,9 @@ def test_geometry_range_for_rejects_unknown() -> None:
     g = _geom()
     with pytest.raises(ValueError):
         g.range_for("nope")
+
+
+def test_volume_version_delegates_to_backend(fake_backend):
+    from eggseis.data import SeismicVolume
+    vol = SeismicVolume(fake_backend, name="x")
+    assert vol.version == fake_backend.version

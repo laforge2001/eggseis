@@ -79,6 +79,19 @@ class MDIOBackend:
     def dtype(self) -> np.dtype:
         return self._var.dtype
 
+    @property
+    def version(self) -> tuple:
+        """`(backend_kind, resolved_path, st_size, st_mtime_ns)` — used as a cache key.
+
+        For MDIO, `path` is a directory; its `st_mtime_ns` updates whenever
+        immediate children change. Adequate for read-only surveys; in-place
+        chunk edits at identical size + mtime would falsely hit the cache,
+        and that is acceptable for v1.0.
+        """
+        p = self.path.resolve()
+        st = p.stat()
+        return ("mdio", str(p), st.st_size, st.st_mtime_ns)
+
     def read_inline(self, inline: int) -> np.ndarray:
         return (
             self._var.sel({self._inline_dim: inline})

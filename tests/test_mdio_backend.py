@@ -65,3 +65,13 @@ def test_volume_wraps_backend(sample_mdio_path) -> None:
     g = vol.geometry
     arr = vol.read_inline(g.inline_min)
     assert arr.shape == (g.n_xlines, g.n_samples)
+
+
+def test_mdio_version_includes_path_and_stat(sample_mdio_path):
+    from eggseis.backends.mdio import MDIOBackend
+    b = MDIOBackend(sample_mdio_path)
+    v = b.version
+    assert v[0] == "mdio"
+    assert v[1] == str(sample_mdio_path.resolve())
+    assert isinstance(v[2], int) and v[2] > 0   # st_size
+    assert isinstance(v[3], int) and v[3] > 0   # st_mtime_ns
