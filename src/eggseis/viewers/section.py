@@ -39,6 +39,7 @@ class SectionViewer(QWidget):
         self._index: int = 0
         self._last_emit_key: tuple | None = None
         self._overlay: np.ndarray | None = None
+        self._partial_overlay: bool = False
         # Baseline levels = (p1, p99) of the raw slice. When locked, overlays
         # render against this fixed range so amplitude-changing plugins (gain,
         # clip) are visibly intuitive instead of being normalized away.
@@ -80,13 +81,22 @@ class SectionViewer(QWidget):
         self._levels_locked = locked
         self._render()
 
-    def set_overlay(self, arr: np.ndarray) -> None:
-        """Display `arr` (same shape as the source slice) instead of raw data."""
+    def set_overlay(self, arr: np.ndarray, *, partial: bool = False) -> None:
+        """Display `arr` instead of raw data.
+
+        `partial=True` indicates an in-progress paint from a tile worker;
+        suppresses any baseline-level recompute so the colour scale stays
+        stable across the run. The orchestrator's final `sectionReady` paint
+        passes `partial=False` to allow level refresh when levels are not
+        locked.
+        """
         self._overlay = arr
+        self._partial_overlay = partial
         self._render()
 
     def clear_overlay(self) -> None:
         self._overlay = None
+        self._partial_overlay = False
         self._render()
 
     @property
@@ -99,6 +109,7 @@ class SectionViewer(QWidget):
         self._index = volume.geometry.inline_min
         self._last_emit_key = None
         self._overlay = None
+        self._partial_overlay = False
         self._baseline_levels = None
         self._render()
 
@@ -108,6 +119,7 @@ class SectionViewer(QWidget):
         self._last_emit_key = None
         # Slice changed → overlay + baseline both stale.
         self._overlay = None
+        self._partial_overlay = False
         self._baseline_levels = None
         self._render()
 
@@ -134,6 +146,9 @@ class SectionViewer(QWidget):
         arr = source.T if self._axis in (Axis.INLINE, Axis.XLINE) else source
 
         if showing_overlay and self._levels_locked and self._baseline_levels is not None:
+            levels = self._baseline_levels
+        elif showing_overlay and self._partial_overlay and self._baseline_levels is not None:
+            # Don't recompute levels mid-paint; reuse what we have.
             levels = self._baseline_levels
         else:
             levels = self._compute_levels(arr)
