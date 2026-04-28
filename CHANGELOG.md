@@ -2,6 +2,30 @@
 
 All notable changes to eggseis are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [PEP 440](https://peps.python.org/pep-0440/).
 
+## [0.1.0a4] — 2026-04-27
+
+**M4 — "The compute feels good" complete.**
+
+### Added
+- `eggseis.compute` package: `JobOrchestrator` (`QObject`) owns a `QThreadPool`, a 150 ms debounce timer, a 50 ms progressive-delivery timer, and an in-memory `SectionLRU`. `request(spec, params, volume, axis, index)` is the single GUI entry point.
+- `SectionLRU` — `OrderedDict`-backed byte-budgeted cache (default 500 MB; override with `EGGSEIS_CACHE_BYTES`). `CacheKey` includes `(plugin_id, plugin_version, params_hash, axis, index, volume_version)`; `params_hash` is a canonical-JSON blake2b digest stable across dict orderings. `deterministic=False` plugins skip the cache on both reads and writes.
+- `Tile` + `split_section()` — center-out priority (visible middle of the section paints first).
+- `TileRunnable` (`QRunnable`) + `TileSignals` (`QObject`) — single-tile workers with cooperative cancel checked between trace rows (scalar) or before each tile call (vectorized). Worker exceptions surface as a `failed(job_id, message)` signal.
+- `Job` + `CancellationToken` — pure-Python primitives carrying spec/params/section/output/context/token per request.
+- `SeismicVolume.version` + `MDIOBackend.version` — opaque tuple identity used as a cache-key input.
+- `eggseis.plugin_runner.compute_tile()` — extracted trace-loop primitive shared by the synchronous CLI/library path and the new tile workers. `run_on_section` now delegates to it.
+- `SectionViewer.set_overlay(arr, *, partial=False)` — partial paints reuse baseline percentile levels so the colour scale stays stable across in-progress emissions.
+- `MainWindow` is wired to `JobOrchestrator`: `tilesReady` paints partials, `sectionReady` paints the final image, `failed` surfaces a status-bar message and aggregates into a session-scoped log shown via **Help → Compute Errors…**. The most recently emitted plugin params are cached so a slice change preserves the user's slider values instead of resetting to plugin defaults.
+- `docs/development.md` gains a "Compute model (M4+)" section; `docs/plugin-authoring.md` gains a `deterministic=False` note.
+
+### Changed
+- `pyproject.toml` ruff per-file ignore extended to `src/eggseis/compute/*.py = ["N815"]` (Qt camelCase signal names follow the same rule as `widgets/` and `viewers/`).
+
+### Notes
+- Library/CLI behavior unchanged. `eggseis info`, `eggseis dump-inline`, and `eggseis plugins` continue to use synchronous `run_on_section`. The orchestrator is GUI-only.
+- 129 tests at the M4 cut. CI matrix green across macOS / Ubuntu / Windows × Python 3.11 / 3.12.
+- Pipeline chains (linear, M5) and DAG + canvas (M6) reuse the M4 cache via stable per-node keys; no parallel cache.
+
 ## [0.1.0a3] — 2026-04-27
 
 **M3 — "The plugin runs" complete.**
