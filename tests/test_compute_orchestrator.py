@@ -235,3 +235,29 @@ def test_supersede_cancels_in_flight_job(qtbot, fake_backend, very_slow_spec):
                      vol, "inline", vol.geometry.inline_min + 1)
 
     assert first_token.cancelled is True
+
+
+@pytest.fixture
+def noise_spec():
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+    clear_registry()
+
+    @trace_attribute(name="Noise", version="0.1.0", deterministic=False)
+    def noise(trace, gain: float = Param(1.0)):
+        return np.random.default_rng().standard_normal(trace.shape).astype(np.float32)
+
+    yield noise._eggseis_spec
+    clear_registry()
+
+
+def test_non_deterministic_plugin_is_not_cached(qtbot, fake_backend, noise_spec):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    orch = JobOrchestrator()
+
+    with qtbot.waitSignal(orch.sectionReady, timeout=5000):
+        orch.request(noise_spec, noise_spec.param_model(),
+                     vol, "inline", vol.geometry.inline_min)
+    assert len(orch.cache) == 0
