@@ -278,6 +278,8 @@ git commit -m "feat(compute): SectionLRU cache + params_hash"
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 from eggseis.compute.tile import Tile, split_section
 
 
@@ -287,7 +289,7 @@ def test_split_section_covers_full_range():
     # contiguous, no gaps, no overlap, hits exactly 200
     assert spans[0][0] == 0
     assert spans[-1][1] == 200
-    for (a_start, a_stop), (b_start, b_stop) in zip(spans, spans[1:]):
+    for (_, a_stop), (b_start, _) in pairwise(spans):
         assert a_stop == b_start
 
 
@@ -310,7 +312,7 @@ def test_split_section_handles_partial_final_tile():
 def test_split_section_single_tile_when_smaller_than_tile_size():
     tiles = split_section(40, tile_size=64)
     assert len(tiles) == 1
-    assert tiles[0] == Tile(start=0, stop=40, priority=0) or tiles[0].size == 40
+    assert tiles[0] == Tile(start=0, stop=40, priority=0)
 ```
 
 - [ ] **Step 2.2: Run, verify fail**
