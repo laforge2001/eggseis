@@ -67,3 +67,36 @@ def test_tile_runnable_skips_when_token_already_cancelled(qtbot, envelope_spec_a
     qtbot.wait(150)
     assert completed == []
     assert (job.output == 0).all()
+
+
+def test_orchestrator_returns_from_cache_when_present(qtbot, fake_backend):
+    from eggseis.builtins.envelope import envelope
+    from eggseis.compute.cache import CacheKey, SectionLRU, params_hash
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    spec = envelope._eggseis_spec
+    params = spec.param_model()
+    cache = SectionLRU()
+    pre = np.full(
+        (vol.geometry.n_xlines, vol.geometry.n_samples), 7.0, dtype=np.float32
+    )
+    cache.put(
+        CacheKey(
+            plugin_id=spec.id,
+            plugin_version=spec.version,
+            params_hash=params_hash(params.model_dump()),
+            axis="inline",
+            index=vol.geometry.inline_min,
+            volume_version=vol.version,
+        ),
+        pre,
+    )
+
+    orch = JobOrchestrator(cache=cache)
+    with qtbot.waitSignal(orch.sectionReady, timeout=1000) as blocker:
+        orch.request(spec, params, vol, "inline", vol.geometry.inline_min)
+
+    _job_id, arr = blocker.args
+    np.testing.assert_array_equal(arr, pre)
