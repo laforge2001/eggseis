@@ -177,3 +177,24 @@ def test_orchestrator_emits_tiles_ready_progressively(qtbot, fake_backend, slow_
     assert tile_emissions, "tilesReady never fired before sectionReady"
     flat = sorted(r for batch in tile_emissions for r in batch)
     assert any(r[0] == 0 for r in flat)
+
+
+def test_debounce_coalesces_rapid_requests(qtbot, fake_backend):
+    from eggseis.builtins.envelope import envelope
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    spec = envelope._eggseis_spec
+    orch = JobOrchestrator()
+
+    sections: list[int] = []
+    orch.sectionReady.connect(lambda job_id, _arr: sections.append(job_id))
+
+    for i in range(10):
+        orch.request(spec, spec.param_model(), vol, "inline",
+                     vol.geometry.inline_min + (i % vol.geometry.n_inlines))
+
+    qtbot.wait(2000)
+    assert len(sections) <= vol.geometry.n_inlines
+    assert len(orch.cache) <= vol.geometry.n_inlines
