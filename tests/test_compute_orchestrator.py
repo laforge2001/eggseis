@@ -198,3 +198,40 @@ def test_debounce_coalesces_rapid_requests(qtbot, fake_backend):
     qtbot.wait(2000)
     assert len(sections) <= vol.geometry.n_inlines
     assert len(orch.cache) <= vol.geometry.n_inlines
+
+
+@pytest.fixture
+def very_slow_spec():
+    """50 ms per trace — first job stays in flight long enough to be superseded."""
+    import time as _time
+
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="VerySlow", version="0.1.0")
+    def very_slow(trace, gain: float = Param(1.0, min=0.0, max=10.0)):
+        _time.sleep(0.05)
+        return (trace * gain).astype(np.float32)
+
+    yield very_slow._eggseis_spec
+    clear_registry()
+
+
+def test_supersede_cancels_in_flight_job(qtbot, fake_backend, very_slow_spec):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    orch = JobOrchestrator()
+
+    orch.request(very_slow_spec, very_slow_spec.param_model(),
+                 vol, "inline", vol.geometry.inline_min)
+    qtbot.waitUntil(lambda: orch._active is not None, timeout=2000)
+    first_token = orch._active.token
+
+    with qtbot.waitSignal(orch.sectionReady, timeout=20_000):
+        orch.request(very_slow_spec, very_slow_spec.param_model(),
+                     vol, "inline", vol.geometry.inline_min + 1)
+
+    assert first_token.cancelled is True
