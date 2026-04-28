@@ -185,8 +185,13 @@ class JobOrchestrator(QObject):
         self._active = None
 
     def _on_tile_failed(self, job_id: int, message: str) -> None:
-        # Filled in Task 12.
-        return
+        if self._active is None or self._active.id != job_id:
+            return
+        self._active.token.cancel()
+        self._active = None
+        self._delivery.stop()
+        self._delivered_ranges.clear()
+        self.failed.emit(job_id, message)
 
     def _flush_delivery(self) -> None:
         job = self._active

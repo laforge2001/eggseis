@@ -261,3 +261,30 @@ def test_non_deterministic_plugin_is_not_cached(qtbot, fake_backend, noise_spec)
         orch.request(noise_spec, noise_spec.param_model(),
                      vol, "inline", vol.geometry.inline_min)
     assert len(orch.cache) == 0
+
+
+@pytest.fixture
+def broken_spec():
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+    clear_registry()
+
+    @trace_attribute(name="Broken", version="0.1.0")
+    def broken(trace, k: float = Param(1.0)):
+        raise RuntimeError("nope")
+
+    yield broken._eggseis_spec
+    clear_registry()
+
+
+def test_orchestrator_emits_failed_on_worker_exception(qtbot, fake_backend, broken_spec):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    orch = JobOrchestrator()
+
+    with qtbot.waitSignal(orch.failed, timeout=5000) as blocker:
+        orch.request(broken_spec, broken_spec.param_model(),
+                     vol, "inline", vol.geometry.inline_min)
+    _job_id, msg = blocker.args
+    assert "nope" in msg
