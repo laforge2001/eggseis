@@ -20,7 +20,7 @@ from eggseis.backends.mdio import MDIOBackend
 from eggseis.colormaps import LUTS_AVAILABLE
 from eggseis.data import SeismicVolume
 from eggseis.plugin import PluginSpec
-from eggseis.plugin_loader import discover_all
+from eggseis.plugin_loader import discover_all, load_errors
 from eggseis.plugin_runner import run_on_section
 from eggseis.plugin_template import create_template, open_in_editor
 from eggseis.project import Project
@@ -113,9 +113,25 @@ class MainWindow(QMainWindow):
             self._attr_group.addAction(a)
             m_attr.addAction(a)
             self._plugin_actions[spec.id] = a
+        # Snapshot errors collected during discover_all() above.
+        self._plugin_load_errors = load_errors()
 
         m_help = self.menuBar().addMenu("&Help")
         m_help.addAction(QAction("&About", self))
+        a_errors = QAction("&Plugin Errors…", self)
+        a_errors.triggered.connect(self._on_show_plugin_errors)
+        a_errors.setEnabled(bool(self._plugin_load_errors))
+        if self._plugin_load_errors:
+            a_errors.setText(f"&Plugin Errors… ({len(self._plugin_load_errors)})")
+        self._plugin_errors_action = a_errors
+        m_help.addAction(a_errors)
+        if self._plugin_load_errors:
+            # Surface a transient hint so users don't miss it.
+            self.statusBar().showMessage(
+                f"{len(self._plugin_load_errors)} plugin(s) failed to load — "
+                "see Help → Plugin Errors",
+                10000,
+            )
 
     def _build_shortcuts(self) -> None:
         bindings = (
@@ -149,6 +165,22 @@ class MainWindow(QMainWindow):
             self.open_project(Path(d))
         except (FileNotFoundError, ValueError) as exc:
             QMessageBox.critical(self, "Open Project failed", str(exc))
+
+    def _on_show_plugin_errors(self) -> None:
+        if not self._plugin_load_errors:
+            QMessageBox.information(
+                self, "Plugin Errors", "No plugin load errors recorded."
+            )
+            return
+        body = "\n\n".join(
+            f"• {err.source}\n    {err.message}" for err in self._plugin_load_errors
+        )
+        box = QMessageBox(self)
+        box.setWindowTitle("Plugin Errors")
+        box.setIcon(QMessageBox.Warning)
+        box.setText(f"{len(self._plugin_load_errors)} plugin(s) failed to load:")
+        box.setDetailedText(body)
+        box.exec()
 
     def _on_new_plugin(self) -> None:
         name, ok = QInputDialog.getText(

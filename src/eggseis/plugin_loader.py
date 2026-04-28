@@ -6,6 +6,7 @@ import importlib
 import importlib.util
 import os
 import sys
+from dataclasses import dataclass
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -13,6 +14,24 @@ from eggseis.plugin import PluginSpec, registered
 
 USER_PLUGIN_DIR = Path.home() / ".eggseis" / "plugins"
 PLUGIN_PATH_ENV = "EGGSEIS_PLUGIN_PATH"
+
+
+@dataclass(frozen=True)
+class LoadError:
+    source: str  # path string for files, "entry-point: <name>" for EPs
+    message: str
+
+
+_LOAD_ERRORS: list[LoadError] = []
+
+
+def load_errors() -> tuple[LoadError, ...]:
+    """Errors collected by the most recent discover_all() call."""
+    return tuple(_LOAD_ERRORS)
+
+
+def clear_load_errors() -> None:
+    _LOAD_ERRORS.clear()
 
 
 def _env_path_dirs() -> list[Path]:
@@ -59,8 +78,13 @@ def load_builtins() -> None:
             importlib.reload(sys.modules[mod_name])
 
 
+def _record_error(source: str, message: str) -> None:
+    _LOAD_ERRORS.append(LoadError(source=source, message=message))
+    print(f"eggseis: failed to load plugin {source}: {message}", file=sys.stderr)
+
+
 def load_user_plugins(directory: Path | None = None) -> list[Path]:
-    """Import every *.py file in `directory`. Errors are logged, not raised."""
+    """Import every *.py file in `directory`. Errors are recorded, not raised."""
     target = directory if directory is not None else USER_PLUGIN_DIR
     if not target.is_dir():
         return []
@@ -77,7 +101,7 @@ def load_user_plugins(directory: Path | None = None) -> list[Path]:
         try:
             spec.loader.exec_module(module)
         except Exception as exc:
-            print(f"eggseis: failed to load plugin {path}: {exc}", file=sys.stderr)
+            _record_error(str(path), str(exc))
             sys.modules.pop(mod_name, None)
             continue
         loaded.append(path)
@@ -89,7 +113,7 @@ def load_entry_points() -> None:
         try:
             ep.load()
         except Exception as exc:
-            print(f"eggseis: failed to load entry point {ep.name}: {exc}", file=sys.stderr)
+            _record_error(f"entry-point: {ep.name}", str(exc))
 
 
 def discover_all(user_dir: Path | None = None) -> tuple[PluginSpec, ...]:
@@ -97,8 +121,9 @@ def discover_all(user_dir: Path | None = None) -> tuple[PluginSpec, ...]:
 
     If `user_dir` is given, only that directory is scanned (test-friendly).
     Otherwise the resolved list (`$EGGSEIS_PLUGIN_PATH` + `USER_PLUGIN_DIR`)
-    is used.
+    is used. Errors during discovery are accumulated in `load_errors()`.
     """
+    clear_load_errors()
     load_builtins()
     if user_dir is not None:
         load_user_plugins(user_dir)

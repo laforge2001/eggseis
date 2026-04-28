@@ -123,6 +123,14 @@ def test_clear_attribute_restores_raw(qtbot, demo_project_path):
     assert not win.section_viewer.has_overlay
 
 
+def test_help_plugin_errors_action_disabled_when_clean(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    # No broken plugins in default state → action exists but is disabled.
+    assert hasattr(win, "_plugin_errors_action")
+    assert win._plugin_errors_action.isEnabled() == bool(win._plugin_load_errors)
+
+
 def test_locked_levels_make_gain_visible(qtbot, demo_project_path):
     """With levels locked to the raw slice, multiplying samples changes display."""
     import numpy as np

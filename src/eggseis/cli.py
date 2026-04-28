@@ -72,11 +72,15 @@ def plugins(
     show_params: bool = typer.Option(
         False, "--params", "-p", help="Show parameter declarations for each plugin"
     ),
+    show_errors: bool = typer.Option(
+        False, "--show-errors", help="Print full diagnostics for plugins that failed to load"
+    ),
 ) -> None:
     """List discovered plugins from all configured sources."""
-    from eggseis.plugin_loader import discover_all, resolved_user_dirs
+    from eggseis.plugin_loader import discover_all, load_errors, resolved_user_dirs
 
     specs = discover_all()
+    errors = load_errors()
 
     dirs = resolved_user_dirs()
     if dirs:
@@ -111,6 +115,19 @@ def plugins(
                 row.append("(none)")
         table.add_row(*row)
     console.print(table)
+
+    if errors:
+        console.print()
+        console.print(
+            f"[red]{len(errors)} plugin(s) failed to load.[/red] "
+            "Use --show-errors for details."
+            if not show_errors
+            else f"[red]{len(errors)} plugin(s) failed to load:[/red]"
+        )
+        if show_errors:
+            for err in errors:
+                console.print(f"  [yellow]{err.source}[/yellow]")
+                console.print(f"    {err.message}")
 
 
 @app.command()

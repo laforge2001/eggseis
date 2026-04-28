@@ -12,8 +12,10 @@ from eggseis import plugin_loader
 from eggseis.plugin import clear_registry, registered
 from eggseis.plugin_loader import (
     PLUGIN_PATH_ENV,
+    clear_load_errors,
     discover_all,
     load_builtins,
+    load_errors,
     load_user_plugins,
     resolved_user_dirs,
 )
@@ -153,6 +155,38 @@ def test_resolved_dirs_dedups(tmp_path, monkeypatch):
     monkeypatch.setattr(plugin_loader, "USER_PLUGIN_DIR", d)
     dirs = resolved_user_dirs()
     assert len(dirs) == 1
+
+
+def test_load_errors_captures_broken_file(tmp_path, monkeypatch):
+    (tmp_path / "broken.py").write_text("nope nope this is not python\n")
+    monkeypatch.setenv(PLUGIN_PATH_ENV, "")
+    monkeypatch.setattr(plugin_loader, "USER_PLUGIN_DIR", tmp_path / "ignored")
+    clear_load_errors()
+    load_user_plugins(tmp_path)
+    errs = load_errors()
+    assert len(errs) == 1
+    assert errs[0].source.endswith("broken.py")
+    assert errs[0].message  # non-empty
+
+
+def test_discover_all_clears_prior_errors(tmp_path, monkeypatch):
+    bad = tmp_path / "broken.py"
+    bad.write_text("syntaxerror !!\n")
+    monkeypatch.setenv(PLUGIN_PATH_ENV, str(tmp_path))
+    monkeypatch.setattr(plugin_loader, "USER_PLUGIN_DIR", tmp_path / "missing")
+
+    discover_all()
+    assert len(load_errors()) == 1
+
+    # Fix the file; next discover should succeed and clear the error list.
+    bad.write_text(
+        "from eggseis.plugin import Param, trace_attribute\n"
+        "@trace_attribute(name='Fixed')\n"
+        "def f(trace, k: float = Param(1.0)):\n"
+        "    return trace\n"
+    )
+    discover_all()
+    assert load_errors() == ()
 
 
 def test_explicit_user_dir_overrides_env(tmp_path, monkeypatch):
