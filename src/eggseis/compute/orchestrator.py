@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import os
 
-import numpy as np  # noqa: F401  — used in Tasks 8/9
+import numpy as np
 from pydantic import BaseModel
 from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 
 from eggseis.axes import Axis
 from eggseis.compute.cache import CacheKey, SectionLRU, params_hash
 from eggseis.compute.job import Job
-from eggseis.compute.tile import split_section  # noqa: F401  — used in Task 8
-from eggseis.compute.worker import TileRunnable, TileSignals  # noqa: F401 — used in Task 8
+from eggseis.compute.tile import split_section
+from eggseis.compute.worker import TileRunnable, TileSignals
 from eggseis.data import SeismicVolume
 from eggseis.plugin import PluginSpec
 
@@ -105,13 +105,71 @@ class JobOrchestrator(QObject):
         )
 
     def _dispatch_pending(self) -> None:
-        # Filled in Task 8.
         if self._pending is None:
             return
+        req = self._pending
+        self._pending = None
+        spec: PluginSpec = req["spec"]
+        params: BaseModel = req["params"]
+        volume: SeismicVolume = req["volume"]
+        axis: Axis = req["axis"]
+        index: int = req["index"]
+
+        if axis is Axis.TIMESLICE:
+            # Trace-local attributes don't apply; surface raw and stop.
+            self.sectionReady.emit(Job().id, volume.read_timeslice(index))
+            return
+
+        section = (
+            volume.read_inline(index) if axis is Axis.INLINE else volume.read_xline(index)
+        )
+
+        if self._active is not None:
+            self._active.token.cancel()
+
+        job = Job(
+            spec=spec,
+            params=params,
+            volume=volume,
+            axis=axis,
+            index=index,
+            section=section,
+            output=np.empty_like(section, dtype=np.float32),
+            context={
+                "sample_rate_ms": volume.geometry.sample_rate_ms,
+                "axis": axis.value,
+                "index": index,
+            },
+        )
+        self._active = job
+        tiles = split_section(section.shape[0], TILE_SIZE)
+        self._tiles_remaining = len(tiles)
+        self._delivered_ranges.clear()
+        self._delivery.start()
+        for tile in tiles:
+            self._pool.start(TileRunnable(job, tile, self._signals))
 
     def _on_tile_completed(self, job_id: int, start: int, stop: int) -> None:
-        # Filled in Tasks 8+9.
-        return
+        job = self._active
+        if job is None or job.id != job_id or job.token.cancelled:
+            return
+        self._delivered_ranges.append((start, stop))
+        self._tiles_remaining -= 1
+        if self._tiles_remaining == 0:
+            self._finalize(job)
+
+    def _finalize(self, job: Job) -> None:
+        self._delivery.stop()
+        if self._delivered_ranges:
+            self.tilesReady.emit(job.id, job.output, list(self._delivered_ranges))
+            self._delivered_ranges.clear()
+        if job.spec.deterministic:
+            self._cache.put(
+                self._make_key(job.spec, job.params, job.volume, job.axis, job.index),
+                job.output,
+            )
+        self.sectionReady.emit(job.id, job.output)
+        self._active = None
 
     def _on_tile_failed(self, job_id: int, message: str) -> None:
         # Filled in Task 12.

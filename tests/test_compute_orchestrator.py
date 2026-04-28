@@ -100,3 +100,43 @@ def test_orchestrator_returns_from_cache_when_present(qtbot, fake_backend):
 
     _job_id, arr = blocker.args
     np.testing.assert_array_equal(arr, pre)
+
+
+def test_orchestrator_computes_section_on_miss(qtbot, fake_backend):
+    from eggseis.builtins.envelope import envelope
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.plugin_runner import run_on_section
+
+    vol = SeismicVolume(fake_backend)
+    spec = envelope._eggseis_spec
+    orch = JobOrchestrator()
+    with qtbot.waitSignal(orch.sectionReady, timeout=5000) as blocker:
+        orch.request(spec, spec.param_model(), vol, "inline", vol.geometry.inline_min)
+
+    _job_id, arr = blocker.args
+    expected = run_on_section(
+        spec, spec.param_model(), vol, "inline", vol.geometry.inline_min
+    )
+    np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+
+def test_orchestrator_caches_after_compute(qtbot, fake_backend):
+    import time
+
+    from eggseis.builtins.envelope import envelope
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    spec = envelope._eggseis_spec
+    orch = JobOrchestrator()
+
+    with qtbot.waitSignal(orch.sectionReady, timeout=5000):
+        orch.request(spec, spec.param_model(), vol, "inline", vol.geometry.inline_min)
+    assert len(orch.cache) == 1
+
+    t0 = time.perf_counter()
+    with qtbot.waitSignal(orch.sectionReady, timeout=500):
+        orch.request(spec, spec.param_model(), vol, "inline", vol.geometry.inline_min)
+    assert (time.perf_counter() - t0) * 1000 < 200
