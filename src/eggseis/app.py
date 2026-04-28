@@ -64,6 +64,7 @@ class MainWindow(QMainWindow):
 
         self._project: Project | None = None
         self._active_plugin: PluginSpec | None = None
+        self._active_params = None
         self._plugin_actions: dict[str, QAction] = {}
         self._compute = JobOrchestrator()
         self._compute_errors: list[tuple[str, str]] = []
@@ -247,6 +248,7 @@ class MainWindow(QMainWindow):
 
     def _activate_plugin(self, spec: PluginSpec | None) -> None:
         self._active_plugin = spec
+        self._active_params = None
         self.param_dock.set_plugin(spec)
         if spec is None:
             self.section_viewer.clear_overlay()
@@ -260,6 +262,7 @@ class MainWindow(QMainWindow):
     def _on_params_changed(self, params) -> None:
         if self._active_plugin is None:
             return
+        self._active_params = params
         self._recompute_overlay(params)
 
     def _recompute_overlay(self, params=None) -> None:
@@ -267,7 +270,7 @@ class MainWindow(QMainWindow):
         if spec is None or not self.section_viewer.has_volume:
             return
         if params is None:
-            params = spec.param_model()
+            params = self._active_params or spec.param_model()
         self._compute.request(
             spec,
             params,

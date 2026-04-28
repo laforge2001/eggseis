@@ -89,6 +89,9 @@ class JobOrchestrator(QObject):
             cached = self._cache.get(key)
             if cached is not None:
                 self._pending = None
+                # Cancel any in-flight job; a late tilesReady/sectionReady
+                # from it would clobber this synchronous paint.
+                self.cancel_active()
                 self.sectionReady.emit(Job().id, cached)
                 return
         self._debounce.start()

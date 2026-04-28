@@ -256,3 +256,28 @@ def test_compute_errors_menu_lists_failures(qtbot, demo_project_path):
 
     assert any("boom" in msg for _name, msg in win._compute_errors)
     clear_registry()
+
+
+def test_slice_change_preserves_active_params(qtbot, demo_project_path):
+    """Dragging a slider then switching slices must reuse the dragged value, not defaults."""
+    from eggseis.builtins.envelope import envelope
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    with qtbot.waitSignal(win._compute.sectionReady, timeout=10_000):
+        win._activate_plugin(envelope._eggseis_spec)
+    assert win._active_params is not None
+    snapshot = win._active_params
+
+    # Step the slice; orchestrator should be called with the snapshot params.
+    g = win.section_viewer.geometry
+    new_index = g.inline_min + 1 if win.section_viewer.current_axis == "inline" else g.xline_min + 1
+    with qtbot.waitSignal(win._compute.sectionReady, timeout=10_000):
+        win._on_slice_changed(win.section_viewer.current_axis, new_index)
+    # _active_params is unchanged after the slice change
+    assert win._active_params is snapshot

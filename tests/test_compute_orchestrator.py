@@ -288,3 +288,43 @@ def test_orchestrator_emits_failed_on_worker_exception(qtbot, fake_backend, brok
                      vol, "inline", vol.geometry.inline_min)
     _job_id, msg = blocker.args
     assert "nope" in msg
+
+
+def test_cache_hit_cancels_in_flight_job(qtbot, fake_backend, very_slow_spec):
+    """A late tilesReady from a superseded job must not clobber a cached paint."""
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    orch = JobOrchestrator()
+
+    # Prime cache with a fake result for inline_min + 1.
+    from eggseis.compute.cache import CacheKey, params_hash
+    pre = np.full(
+        (vol.geometry.n_xlines, vol.geometry.n_samples), 9.0, dtype=np.float32
+    )
+    orch.cache.put(
+        CacheKey(
+            plugin_id=very_slow_spec.id,
+            plugin_version=very_slow_spec.version,
+            params_hash=params_hash(very_slow_spec.param_model().model_dump()),
+            axis="inline",
+            index=vol.geometry.inline_min + 1,
+            volume_version=vol.version,
+        ),
+        pre,
+    )
+
+    # Start a slow miss job for inline_min — must dispatch.
+    orch.request(very_slow_spec, very_slow_spec.param_model(),
+                 vol, "inline", vol.geometry.inline_min)
+    qtbot.waitUntil(lambda: orch._active is not None, timeout=2000)
+    first_token = orch._active.token
+
+    # Cache-hit request supersedes the in-flight job.
+    with qtbot.waitSignal(orch.sectionReady, timeout=1000):
+        orch.request(very_slow_spec, very_slow_spec.param_model(),
+                     vol, "inline", vol.geometry.inline_min + 1)
+
+    assert first_token.cancelled is True
+    assert orch._active is None
