@@ -189,5 +189,9 @@ class JobOrchestrator(QObject):
         return
 
     def _flush_delivery(self) -> None:
-        # Filled in Task 9.
-        return
+        job = self._active
+        if job is None or job.token.cancelled or not self._delivered_ranges:
+            return
+        ranges = list(self._delivered_ranges)
+        self._delivered_ranges.clear()
+        self.tilesReady.emit(job.id, job.output, ranges)

@@ -140,3 +140,40 @@ def test_orchestrator_caches_after_compute(qtbot, fake_backend):
     with qtbot.waitSignal(orch.sectionReady, timeout=500):
         orch.request(spec, spec.param_model(), vol, "inline", vol.geometry.inline_min)
     assert (time.perf_counter() - t0) * 1000 < 200
+
+
+@pytest.fixture
+def slow_spec():
+    """Per-trace sleep — long enough that delivery timer fires mid-job."""
+    import time as _time
+
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="Slow", version="0.1.0")
+    def slow(trace, gain: float = Param(1.0, min=0.0, max=10.0)):
+        _time.sleep(0.005)
+        return (trace * gain).astype(np.float32)
+
+    yield slow._eggseis_spec
+    clear_registry()
+
+
+def test_orchestrator_emits_tiles_ready_progressively(qtbot, fake_backend, slow_spec):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    vol = SeismicVolume(fake_backend)
+    orch = JobOrchestrator()
+
+    tile_emissions: list[list[tuple[int, int]]] = []
+    orch.tilesReady.connect(lambda _id, _buf, ranges: tile_emissions.append(list(ranges)))
+
+    with qtbot.waitSignal(orch.sectionReady, timeout=10_000):
+        orch.request(slow_spec, slow_spec.param_model(),
+                     vol, "inline", vol.geometry.inline_min)
+
+    assert tile_emissions, "tilesReady never fired before sectionReady"
+    flat = sorted(r for batch in tile_emissions for r in batch)
+    assert any(r[0] == 0 for r in flat)
