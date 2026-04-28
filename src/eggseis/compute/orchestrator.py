@@ -22,7 +22,20 @@ TILE_SIZE = 64
 
 
 class JobOrchestrator(QObject):
-    """Single point of contact between the GUI and the compute layer."""
+    """Single point of contact between the GUI and the compute layer.
+
+    Signal contract:
+    - `tilesReady(job_id, output_buffer, ranges)` fires every ~50 ms while a
+      job runs, carrying the current `job.output` and the list of
+      `(start, stop)` tile ranges newly written since the previous emission.
+      Consumers paint partial results.
+    - `sectionReady(job_id, array)` fires once when the job completes (or
+      on a synchronous cache hit / timeslice short-circuit). Consumers
+      treat this as the final, authoritative paint.
+    - On the last tile of a normal compute, `tilesReady` may fire
+      back-to-back with `sectionReady` carrying the same buffer; viewers
+      should be idempotent across that pair.
+    """
 
     sectionReady = Signal(int, object)
     tilesReady = Signal(int, object, object)
