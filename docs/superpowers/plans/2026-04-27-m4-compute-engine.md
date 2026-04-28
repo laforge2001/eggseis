@@ -938,7 +938,7 @@ class TileRunnable(QRunnable):
                 self._signals.completed.emit(
                     job.id, self._tile.start, self._tile.stop
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             self._signals.failed.emit(job.id, repr(exc))
 ```
 
