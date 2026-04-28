@@ -213,3 +213,21 @@ def test_slice_change_recomputes_overlay(qtbot, demo_project_path):
     img = win.section_viewer._image.image
     assert img.shape == (g.n_samples, g.n_inlines)
     assert (img >= 0).all()
+
+
+def test_attribute_apply_via_orchestrator(qtbot, demo_project_path):
+    from eggseis.builtins.envelope import envelope
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+
+    survey_item = _find_first_survey_item(win.tree)
+    win.tree.itemDoubleClicked.emit(survey_item, 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    with qtbot.waitSignal(win._compute.sectionReady, timeout=10_000):
+        win._activate_plugin(envelope._eggseis_spec)
+
+    assert win.section_viewer.has_overlay

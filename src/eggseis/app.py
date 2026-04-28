@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
 from eggseis.axes import Axis
 from eggseis.backends.mdio import MDIOBackend
 from eggseis.colormaps import LUTS_AVAILABLE
+from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
 from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
-from eggseis.plugin_runner import run_on_section
 from eggseis.plugin_template import create_template, open_in_editor
 from eggseis.project import Project
 from eggseis.viewers.section import DEFAULT_LUT, SectionViewer
@@ -65,6 +65,11 @@ class MainWindow(QMainWindow):
         self._project: Project | None = None
         self._active_plugin: PluginSpec | None = None
         self._plugin_actions: dict[str, QAction] = {}
+        self._compute = JobOrchestrator()
+        self._compute_errors: list[tuple[str, str]] = []
+        self._compute.tilesReady.connect(self._on_tiles_ready)
+        self._compute.sectionReady.connect(self._on_section_ready)
+        self._compute.failed.connect(self._on_compute_failed)
         self._build_menus()
         self._wire_signals()
         self._build_shortcuts()
@@ -243,15 +248,22 @@ class MainWindow(QMainWindow):
             return
         if params is None:
             params = spec.param_model()
-        try:
-            arr = run_on_section(
-                spec,
-                params,
-                self.section_viewer._volume,
-                self.section_viewer.current_axis,
-                self.section_viewer.current_index,
-            )
-        except Exception as exc:
-            self.statusBar().showMessage(f"{spec.name} failed: {exc}", 5000)
-            return
-        self.section_viewer.set_overlay(arr)
+        self._compute.request(
+            spec,
+            params,
+            self.section_viewer._volume,
+            self.section_viewer.current_axis,
+            self.section_viewer.current_index,
+        )
+
+    def _on_tiles_ready(self, _job_id: int, buffer, _ranges) -> None:
+        self.section_viewer.set_overlay(buffer, partial=True)
+
+    def _on_section_ready(self, _job_id: int, arr) -> None:
+        self.section_viewer.set_overlay(arr, partial=False)
+
+    def _on_compute_failed(self, _job_id: int, message: str) -> None:
+        spec = self._active_plugin
+        name = spec.name if spec else "compute"
+        self._compute_errors.append((name, message))
+        self.statusBar().showMessage(f"{name} failed: {message}", 5000)
