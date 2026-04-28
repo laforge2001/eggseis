@@ -38,6 +38,12 @@ class SectionViewer(QWidget):
         self._axis: Axis = Axis.INLINE
         self._index: int = 0
         self._last_emit_key: tuple | None = None
+        self._overlay: np.ndarray | None = None
+        # Baseline levels = (p1, p99) of the raw slice. When locked, overlays
+        # render against this fixed range so amplitude-changing plugins (gain,
+        # clip) are visibly intuitive instead of being normalized away.
+        self._baseline_levels: tuple[float, float] | None = None
+        self._levels_locked: bool = True
 
         self._proxy = pg.SignalProxy(
             self._plot.scene().sigMouseMoved,
@@ -62,6 +68,28 @@ class SectionViewer(QWidget):
         return self._volume is not None
 
     @property
+    def has_overlay(self) -> bool:
+        return self._overlay is not None
+
+    @property
+    def levels_locked(self) -> bool:
+        return self._levels_locked
+
+    def set_levels_locked(self, locked: bool) -> None:
+        """When True, overlay paints reuse the raw-slice percentile levels."""
+        self._levels_locked = locked
+        self._render()
+
+    def set_overlay(self, arr: np.ndarray) -> None:
+        """Display `arr` (same shape as the source slice) instead of raw data."""
+        self._overlay = arr
+        self._render()
+
+    def clear_overlay(self) -> None:
+        self._overlay = None
+        self._render()
+
+    @property
     def geometry(self):
         return self._volume.geometry if self._volume else None
 
@@ -70,12 +98,17 @@ class SectionViewer(QWidget):
         self._axis = Axis.INLINE
         self._index = volume.geometry.inline_min
         self._last_emit_key = None
+        self._overlay = None
+        self._baseline_levels = None
         self._render()
 
     def show_slice(self, axis: Axis | str, index: int) -> None:
         self._axis = Axis(axis)
         self._index = index
         self._last_emit_key = None
+        # Slice changed → overlay + baseline both stale.
+        self._overlay = None
+        self._baseline_levels = None
         self._render()
 
     def set_colormap(self, name: str) -> None:
@@ -85,17 +118,38 @@ class SectionViewer(QWidget):
     def _render(self) -> None:
         if self._volume is None:
             return
-        if self._axis is Axis.INLINE:
-            arr = self._volume.read_inline(self._index).T
+
+        showing_overlay = self._overlay is not None
+        if showing_overlay:
+            source = self._overlay
+        elif self._axis is Axis.INLINE:
+            source = self._volume.read_inline(self._index)
         elif self._axis is Axis.XLINE:
-            arr = self._volume.read_xline(self._index).T
+            source = self._volume.read_xline(self._index)
         else:
-            arr = self._volume.read_timeslice(self._index)
+            source = self._volume.read_timeslice(self._index)
+
+        # Inline / xline: time on vertical axis (transpose).
+        # Timeslice: already (n_inlines, n_xlines).
+        arr = source.T if self._axis in (Axis.INLINE, Axis.XLINE) else source
+
+        if showing_overlay and self._levels_locked and self._baseline_levels is not None:
+            levels = self._baseline_levels
+        else:
+            levels = self._compute_levels(arr)
+            if not showing_overlay:
+                # Cache raw-slice levels so overlay paints can lock to them.
+                self._baseline_levels = levels
+
+        self._image.setImage(arr, levels=levels)
+
+    @staticmethod
+    def _compute_levels(arr: np.ndarray) -> tuple[float, float]:
         sample = arr.ravel()[::_PERCENTILE_SUBSAMPLE]
         p_low, p_high = np.percentile(sample, [1, 99])
         if p_high == p_low:
             p_high = p_low + 1.0
-        self._image.setImage(arr, levels=(float(p_low), float(p_high)))
+        return float(p_low), float(p_high)
 
     def _on_mouse_moved(self, evt) -> None:
         if self._volume is None:

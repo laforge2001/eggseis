@@ -36,6 +36,7 @@ These were settled during the design phase. Revisit them only with strong cause.
 | Volume viewer | PyVista + VTK; three slicing planes default, full volume render opt-in |
 | Crossplot | pyqtgraph + datashader (auto-switch above ~500K points) |
 | Parameter UI | Pydantic schemas + magicgui widgets |
+| Plugin composition | Linear chain in M5; full DAG with visual node-graph canvas in M6. Tap-anywhere inspection at every node/port. |
 | Distribution | Micromamba-bundled conda-forge environment; signed installers per platform |
 | Governance | BDFL (you) until phase 2 (~5 contributors); plan to evolve |
 
@@ -132,7 +133,56 @@ Each milestone ends in something demonstrable. Estimates assume part-time evenin
 
 ---
 
-### M5 — "Horizons and wells" *(weeks 21–26)*
+### M5 — "The pipeline chains" *(weeks 21–23)*
+
+**Deliverable:** A linear plugin pipeline. Stack two or more attributes on a survey, inspect the data at any node in the chain, edit a node's parameters and watch only the dirty downstream segment recompute.
+
+**What gets built:**
+- `eggseis.pipeline.Pipeline` and `Node` — append, remove, reorder, enable/disable, per-node param storage.
+- `eggseis.pipeline_runner.run_up_to(pipeline, volume, axis, index, tap_node_id)` — execute through the tap, return the intermediate array.
+- Stable per-node cache key: `hash(plugin_id, plugin_version, params, upstream_key)`. Reuses M4's in-memory LRU directly — no parallel cache.
+- `PipelineDock` widget: list-style UI in the main window. Add (from discovered plugins), remove, drag-reorder, enable checkbox, per-row param editor, "tap" radio.
+- Tap-on-disabled semantics: skip the node, return upstream output. Documented and tested.
+- Section viewer binds to `(pipeline, tap_node_id)` instead of raw `read_inline`. Source = node 0 (always tap-able, raw amplitude).
+- Headless tests covering: chain semantics, cache hit/miss, parameter-edit invalidates downstream only, tap-anywhere produces correct intermediate.
+
+**Exit criteria:**
+- Build a 3-node chain (e.g. `bandpass → envelope → rms_amplitude`); tap each node; section viewer shows that node's output.
+- Edit `bandpass` parameters: nodes 2 and 3 recompute, node 1's prior outputs evicted, prior taps unaffected if same params reappear (cache reuse via M4 LRU).
+- Disable middle node: chain skips it, downstream recomputes against upstream.
+- Performance: tap switch on a cache-warm node paints in <50ms (inherits M4 cache hit budget).
+
+**Why this matters:** turns plugins from "one-shot effects" into a workflow. Once a user can chain three attributes and inspect each, the tool starts to feel like an interpretation environment instead of a viewer.
+
+**Out of scope (deferred to M6):** branching, multi-input nodes, visual node-graph canvas, persistence in `project.yaml` (M7 owns project save).
+
+---
+
+### M6 — "The graph branches" *(weeks 24–29)*
+
+**Deliverable:** A real DAG. Visual node-graph canvas with draggable boxes and wired ports. Multi-input plugins (e.g. `subtract(a, b)`). Tap-on-port inspection at any output anywhere in the graph.
+
+**What gets built:**
+- DAG topology: nodes with N inputs and M outputs, topological execution order, cycle detection, dangling-input handling.
+- `@graph_node(inputs=("a","b"), output="result")` — generalized decorator. `@trace_attribute` becomes the single-input shorthand and stays valid.
+- Visual canvas widget: pan/zoom, multi-select, drag-to-wire, port-type checks (`np.ndarray` only in v1.0). Pick a library or hand-roll based on a one-week spike at milestone start: evaluate `qtnodes`, `node-editor`, `Qt-Node-Evaluator`, `pyflow`. Use one if it fits.
+- Tap-anywhere extends to "tap any output port"; cache key chain extends naturally from M5 (each upstream port contributes its key).
+- Per-node parameter editor docked alongside canvas (selection-driven).
+- Headless tests for graph topology (cycles rejected, topo order correct, branch invalidation precise).
+
+**Exit criteria:**
+- Build a non-trivial graph: `bandpass → envelope` and `bandpass → instantaneous_phase`, both feeding a `crossplot_pair(x, y)` node; tap each port; outputs verified against direct compute.
+- Canvas usability: drag, wire, multi-select, delete, undo/redo basic ops.
+- Save/restore the graph round-trips (in-memory only in M6; project-file persistence remains M7).
+- Cycle attempt fails loudly with a clear error message.
+
+**Why this matters:** the moment the tool has a node graph, it stops being a section viewer and starts being a platform. This is also where attribute composition (the actual scientific workflow) becomes visible and editable.
+
+**Risk note:** this is the single hardest milestone in the project. If the canvas spike at week 1 stalls, ship M6 with the M5 list-dock UI plus DAG topology (no visual canvas) and defer the canvas to v1.1. Branching DAG semantics matter more for v1.0 value than the canvas does.
+
+---
+
+### M7 — "Horizons and wells" *(weeks 30–35)*
 
 **Deliverable:** Import and display horizons and wells on the section viewer. Project save/load round-trips correctly.
 
@@ -156,7 +206,7 @@ Each milestone ends in something demonstrable. Estimates assume part-time evenin
 
 ---
 
-### M6 — "The volume" *(weeks 27–32)*
+### M8 — "The volume" *(weeks 36–41)*
 
 **Deliverable:** PyVista volume viewer with three slicing planes, bounding box, horizon surfaces, well paths. Linked with the section viewer.
 
@@ -180,7 +230,7 @@ Each milestone ends in something demonstrable. Estimates assume part-time evenin
 
 ---
 
-### M7 — "The crossplot" *(weeks 33–38)*
+### M9 — "The crossplot" *(weeks 42–47)*
 
 **Deliverable:** pyqtgraph crossplot with header selection, lasso selection, linked highlighting in section and volume viewers. Datashader engages automatically above threshold.
 
@@ -203,7 +253,7 @@ Each milestone ends in something demonstrable. Estimates assume part-time evenin
 
 ---
 
-### M8 — "Alpha to real users" *(weeks 39–46)*
+### M10 — "Alpha to real users" *(weeks 48–55)*
 
 **Deliverable:** Cross-platform installers, signed builds, auto-update check, first-run demo project. Ship a private alpha to 5–10 geoscientists you know. Fix the embarrassing things they find.
 
@@ -223,13 +273,13 @@ Each milestone ends in something demonstrable. Estimates assume part-time evenin
 **Exit criteria:**
 - Five geoscientists install the app on their own machines (Windows + macOS coverage minimum) without your help.
 - Each one runs through the demo project and writes at least one custom plugin.
-- You collect a list of at least 20 issues from them and fix the top 10 before M9.
+- You collect a list of at least 20 issues from them and fix the top 10 before M11.
 
-**Why this matters:** this is where you find out what you got wrong. You will have gotten something important wrong. Better to know at week 40 than week 80.
+**Why this matters:** this is where you find out what you got wrong. You will have gotten something important wrong. Better to know at week 48 than week 96.
 
 ---
 
-### M9 — "v1.0 public" *(weeks 47–52)*
+### M11 — "v1.0 public" *(weeks 56–61)*
 
 **Deliverable:** Public release. GitHub repo polished, docs published, announcement on Software Underground / LinkedIn / blog. Five solid built-in attributes. A small registry of community plugins (even if seeded with 2–3 you wrote yourself).
 

@@ -68,5 +68,148 @@ def test_main_window_menus(qtbot):
 
     bar = win.menuBar()
     titles = [a.text().replace("&", "") for a in bar.actions()]
-    assert titles == ["File", "View", "Help"]
+    assert titles == ["File", "View", "Attribute", "Help"]
     _ = Qt
+
+
+def test_attribute_menu_lists_builtins(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    names = [a.text() for a in win._attr_group.actions()]
+    assert "None (raw amplitude)" in names
+    assert "Envelope" in names
+    assert "Ormsby Bandpass" in names
+
+
+def test_apply_envelope_paints_overlay(qtbot, demo_project_path):
+    from eggseis.builtins.envelope import envelope
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+
+    survey_item = _find_first_survey_item(win.tree)
+    win.tree.itemDoubleClicked.emit(survey_item, 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    raw_img = win.section_viewer._image.image.copy()
+
+    win._activate_plugin(envelope._eggseis_spec)
+    qtbot.waitUntil(lambda: win.section_viewer.has_overlay, timeout=2000)
+
+    overlay_img = win.section_viewer._image.image
+    g = win.section_viewer.geometry
+    assert overlay_img.shape == (g.n_samples, g.n_xlines)
+    # envelope is non-negative; raw amplitude is signed → arrays must differ
+    assert not (raw_img == overlay_img).all()
+    assert (overlay_img >= 0).all()
+
+
+def test_clear_attribute_restores_raw(qtbot, demo_project_path):
+    from eggseis.builtins.envelope import envelope
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    win._activate_plugin(envelope._eggseis_spec)
+    qtbot.waitUntil(lambda: win.section_viewer.has_overlay, timeout=2000)
+
+    win._activate_plugin(None)
+    assert not win.section_viewer.has_overlay
+
+
+def test_help_plugin_errors_action_disabled_when_clean(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    # No broken plugins in default state → action exists but is disabled.
+    assert hasattr(win, "_plugin_errors_action")
+    assert win._plugin_errors_action.isEnabled() == bool(win._plugin_load_errors)
+
+
+def test_locked_levels_make_gain_visible(qtbot, demo_project_path):
+    """With levels locked to the raw slice, multiplying samples changes display."""
+    import numpy as np
+
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="TestGain")
+    def test_gain(trace, k: float = Param(2.0, min=0.0, max=10.0)):
+        return (trace * k).astype(np.float32)
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    raw_levels = win.section_viewer._baseline_levels
+    assert raw_levels is not None
+    raw_low, raw_high = raw_levels
+    _ = raw_low  # used implicitly via tuple compare below
+
+    assert win.section_viewer.levels_locked is True
+    win._activate_plugin(test_gain._eggseis_spec)
+    qtbot.waitUntil(lambda: win.section_viewer.has_overlay, timeout=2000)
+
+    # Locked: image levels still match raw baseline → gain × 2 visibly differs
+    # because the data values are 2× while the LUT mapping is unchanged.
+    locked_low, locked_high = win.section_viewer._image.levels
+    assert (locked_low, locked_high) == (raw_low, raw_high)
+
+
+def test_unlocked_levels_recompute_for_overlay(qtbot, demo_project_path):
+    import numpy as np
+
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="TestGain2")
+    def test_gain2(trace, k: float = Param(3.0, min=0.0, max=10.0)):
+        return (trace * k).astype(np.float32)
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    win.section_viewer.set_levels_locked(False)
+    win._activate_plugin(test_gain2._eggseis_spec)
+    qtbot.waitUntil(lambda: win.section_viewer.has_overlay, timeout=2000)
+
+    # Unlocked: levels recompute from overlay (≈3× raw bounds).
+    _raw_low, raw_high = win.section_viewer._baseline_levels
+    _over_low, over_high = win.section_viewer._image.levels
+    assert abs(over_high) > abs(raw_high) * 1.5
+
+
+def test_slice_change_recomputes_overlay(qtbot, demo_project_path):
+    from eggseis.builtins.envelope import envelope
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    win._activate_plugin(envelope._eggseis_spec)
+    qtbot.waitUntil(lambda: win.section_viewer.has_overlay, timeout=2000)
+    g = win.section_viewer.geometry
+
+    win.slice_nav.axis.setCurrentText("xline")
+    qtbot.waitUntil(lambda: win.section_viewer.has_overlay, timeout=2000)
+    assert win.section_viewer.current_axis == "xline"
+    img = win.section_viewer._image.image
+    assert img.shape == (g.n_samples, g.n_inlines)
+    assert (img >= 0).all()

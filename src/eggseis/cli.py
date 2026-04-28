@@ -68,6 +68,69 @@ def dump_inline(
 
 
 @app.command()
+def plugins(
+    show_params: bool = typer.Option(
+        False, "--params", "-p", help="Show parameter declarations for each plugin"
+    ),
+    show_errors: bool = typer.Option(
+        False, "--show-errors", help="Print full diagnostics for plugins that failed to load"
+    ),
+) -> None:
+    """List discovered plugins from all configured sources."""
+    from eggseis.plugin_loader import discover_all, load_errors, resolved_user_dirs
+
+    specs = discover_all()
+    errors = load_errors()
+
+    dirs = resolved_user_dirs()
+    if dirs:
+        console.print("[dim]Plugin directories scanned:[/dim]")
+        for d in dirs:
+            mark = "" if d.is_dir() else " [yellow](missing)[/yellow]"
+            console.print(f"  {d}{mark}")
+        console.print()
+
+    table = Table(title=f"Plugins ({len(specs)})", show_lines=show_params)
+    table.add_column("Name", style="cyan")
+    table.add_column("Version")
+    table.add_column("Source")
+    if show_params:
+        table.add_column("Parameters")
+
+    for spec in sorted(specs, key=lambda s: s.name):
+        source = spec.source_path or "(built-in / entry point)"
+        row = [spec.name, spec.version, source]
+        if show_params:
+            if spec.params_decl:
+                lines = []
+                for pname, p in spec.params_decl.items():
+                    bits = [f"default={p.default}"]
+                    if p.min is not None or p.max is not None:
+                        bits.append(f"range=[{p.min}, {p.max}]")
+                    if p.units:
+                        bits.append(f"units={p.units}")
+                    lines.append(f"{pname}: {', '.join(bits)}")
+                row.append("\n".join(lines))
+            else:
+                row.append("(none)")
+        table.add_row(*row)
+    console.print(table)
+
+    if errors:
+        console.print()
+        console.print(
+            f"[red]{len(errors)} plugin(s) failed to load.[/red] "
+            "Use --show-errors for details."
+            if not show_errors
+            else f"[red]{len(errors)} plugin(s) failed to load:[/red]"
+        )
+        if show_errors:
+            for err in errors:
+                console.print(f"  [yellow]{err.source}[/yellow]")
+                console.print(f"    {err.message}")
+
+
+@app.command()
 def gui(
     project_dir: Path | None = typer.Argument(
         None, help="Optional project directory to open on launch"
