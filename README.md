@@ -109,7 +109,7 @@ The roadmap is:
 
 - **M1** — Data layer + CLI *(complete, [v0.1.0a1](CHANGELOG.md))*
 - **M2** — Section viewer *(complete, [v0.1.0a2](CHANGELOG.md))*
-- **M3** — Plugin API *(in progress; see [`docs/plugin-authoring.md`](docs/plugin-authoring.md))*
+- **M3** — Plugin API *(complete, [v0.1.0a3](CHANGELOG.md); authoring guide in [`docs/plugin-authoring.md`](docs/plugin-authoring.md))*
 - **M4** — Compute engine (threading, debounce, cache)
 - **M5** — Plugin pipelines (linear chain + tap-anywhere)
 - **M6** — Plugin graphs (DAG + visual node canvas)
