@@ -2,12 +2,44 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from pydantic import BaseModel
 
 from eggseis.axes import Axis
 from eggseis.data import SeismicVolume
 from eggseis.plugin import PluginSpec
+
+
+def compute_tile(
+    spec: PluginSpec,
+    params_dump: dict[str, Any],
+    section: np.ndarray,
+    context: dict[str, Any],
+    *,
+    start: int,
+    stop: int,
+    out: np.ndarray,
+) -> None:
+    """Run `spec` over `section[start:stop]`, writing into `out[start:stop]`.
+
+    Used directly by tile workers and indirectly (whole-section call) by
+    the synchronous `run_on_section` below.
+    """
+    if spec.vectorized:
+        kwargs = dict(params_dump)
+        if spec.accepts_context:
+            kwargs["context"] = context
+        result = spec.func(traces=section[start:stop], **kwargs).astype(np.float32)
+        out[start:stop] = result
+        return
+
+    for i in range(start, stop):
+        kwargs = dict(params_dump)
+        if spec.accepts_context:
+            kwargs["context"] = context
+        out[i] = spec.func(section[i], **kwargs)
 
 
 def run_on_section(
@@ -19,11 +51,10 @@ def run_on_section(
 ) -> np.ndarray:
     """Run a trace-local plugin across every trace in the visible section.
 
-    Returns an array shaped exactly like the source slice (no transpose).
-    The viewer is responsible for any orientation it wants to apply.
+    Synchronous; library/CLI use this. The GUI uses `JobOrchestrator` instead.
 
-    For timeslices, the slice is horizontal and trace-local attributes do
-    not apply — the source array is returned unchanged.
+    For timeslices, trace-local attributes do not apply — the source array is
+    returned unchanged.
     """
     axis = Axis(axis)
     if axis is Axis.INLINE:
@@ -39,18 +70,14 @@ def run_on_section(
         "axis": axis.value,
         "index": index,
     }
-    p = params.model_dump()
-
-    if spec.vectorized:
-        kwargs = dict(p)
-        if spec.accepts_context:
-            kwargs["context"] = context
-        return spec.func(traces=section, **kwargs).astype(np.float32)
-
     out = np.empty_like(section, dtype=np.float32)
-    for i in range(section.shape[0]):
-        kwargs = dict(p)
-        if spec.accepts_context:
-            kwargs["context"] = context
-        out[i] = spec.func(section[i], **kwargs)
+    compute_tile(
+        spec,
+        params.model_dump(),
+        section,
+        context,
+        start=0,
+        stop=section.shape[0],
+        out=out,
+    )
     return out
