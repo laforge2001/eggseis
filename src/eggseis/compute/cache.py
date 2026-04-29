@@ -18,8 +18,9 @@ def params_hash(params_dump: dict[str, Any]) -> str:
     """Stable 16-byte hex digest of a parameter dict.
 
     Canonical-JSON encoding (sorted keys, no whitespace) means two equal dicts
-    always hash the same regardless of insertion order.  Also used as the leaf
-    contribution when computing a single-node `chain_hash`.
+    always hash the same regardless of insertion order.  For single-node
+    (non-chained) callers, this digest is the value stored in
+    `CacheKey.chain_hash`.
     """
     blob = json.dumps(params_dump, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.blake2b(blob, digest_size=16).hexdigest()

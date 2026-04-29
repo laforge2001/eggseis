@@ -79,7 +79,7 @@ def test_lru_drops_silently_when_value_exceeds_budget():
 
 
 def test_make_cache_key_uses_chain_hash_override_when_provided(fake_backend):
-    from eggseis.compute.cache import make_cache_key
+    from eggseis.compute.cache import make_cache_key, params_hash
     from eggseis.data import SeismicVolume
 
     class _StubSpec:
@@ -95,3 +95,8 @@ def test_make_cache_key_uses_chain_hash_override_when_provided(fake_backend):
         _StubSpec(), _StubParams(), volume, "inline", 0, chain_hash="deadbeef"
     )
     assert key.chain_hash == "deadbeef"
+
+    # Default path: no chain_hash kwarg → uses params_hash(model_dump()).
+    key_default = make_cache_key(_StubSpec(), _StubParams(), volume, "inline", 0)
+    expected = params_hash({"a": 1})
+    assert key_default.chain_hash == expected
