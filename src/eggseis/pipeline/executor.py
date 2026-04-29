@@ -12,6 +12,7 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from eggseis.axes import Axis
+from eggseis.compute.cache import make_cache_key
 from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
 from eggseis.pipeline.model import SOURCE_ID, Node, Pipeline
@@ -48,8 +49,6 @@ class PipelineExecutor(QObject):
             return
 
         # Resolve cold suffix: walk from tap backward, find deepest cache hit.
-        from eggseis.compute.cache import make_cache_key
-
         cache = self._orch.cache
         starting_input: np.ndarray | None = None
         cold_start_idx = 0
@@ -73,7 +72,7 @@ class PipelineExecutor(QObject):
 
         if starting_input is None:
             starting_input = self._read_raw(volume, axis_enum, index)
-            cold_start_idx = 0
+            # cold_start_idx remains 0 (initialized before the cache walk)
 
         cold_nodes = plan[cold_start_idx:]
         self._run_chain(pipeline, volume, axis_enum, index, cold_nodes, starting_input)
@@ -97,6 +96,8 @@ class PipelineExecutor(QObject):
             node = cold_nodes[idx]
             chain_hash = pipeline.chain_hash_for(node.node_id, volume.version)
 
+            # The orchestrator's job_id is intentionally unused here;
+            # supersede / cancellation guard is added in Task 20.
             def on_ready(_section_job_id: int, arr: np.ndarray) -> None:
                 self._orch.sectionReady.disconnect(on_ready)
                 self._orch.failed.disconnect(on_failed)
