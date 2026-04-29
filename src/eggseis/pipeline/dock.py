@@ -12,7 +12,7 @@ Subsequent tasks add: enable checkbox + tap radio per node row, the
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QDockWidget,
     QListWidget,
@@ -27,6 +27,9 @@ from eggseis.pipeline.model import SOURCE_ID, Node, Pipeline
 
 
 class PipelineDock(QDockWidget):
+    pipelineChanged = Signal()
+    tapChanged = Signal(str)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Pipeline", parent)
         self._pipeline: Pipeline | None = None
@@ -49,6 +52,14 @@ class PipelineDock(QDockWidget):
     def bind(self, pipeline: Pipeline) -> None:
         self._pipeline = pipeline
         self._refresh()
+
+    def add_plugin(self, spec) -> None:
+        if self._pipeline is None:
+            return
+        node = Node(spec=spec, params=spec.param_model())
+        self._pipeline.append(node)
+        self._refresh()
+        self.pipelineChanged.emit()
 
     def _refresh(self) -> None:
         self.list_widget.clear()
