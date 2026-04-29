@@ -249,3 +249,66 @@ def test_chain_hash_for_unknown_node_id_raises(linear_spec):
     p.append(Node(spec=linear_spec, params=linear_spec.param_model()))
     with pytest.raises(KeyError):
         p.chain_hash_for("not-a-real-node-id", ("mdio", "/x", 1, 1))
+
+
+def test_deterministic_through_source_is_true(linear_spec):
+    assert Pipeline().deterministic_through(SOURCE_ID) is True
+
+
+def test_deterministic_through_all_deterministic_nodes_true(linear_spec):
+    p = Pipeline()
+    a = Node(spec=linear_spec, params=linear_spec.param_model())
+    b = Node(spec=linear_spec, params=linear_spec.param_model())
+    p.append(a)
+    p.append(b)
+    assert p.deterministic_through(b.node_id) is True
+
+
+def test_deterministic_through_falsy_node_poisons_self_and_downstream():
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
+    def lin(traces, scale: float = Param(default=1.0)):
+        return traces * scale
+
+    @trace_attribute(name="rng", version="0.1.0", deterministic=False, vectorized=True)
+    def rng(traces, amp: float = Param(default=1.0)):
+        return traces
+
+    p = Pipeline()
+    a = Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model())
+    b = Node(spec=rng._eggseis_spec, params=rng._eggseis_spec.param_model())
+    c = Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model())
+    for n in (a, b, c):
+        p.append(n)
+
+    assert p.deterministic_through(a.node_id) is True
+    assert p.deterministic_through(b.node_id) is False
+    assert p.deterministic_through(c.node_id) is False
+    clear_registry()
+
+
+def test_deterministic_through_disabled_non_deterministic_node_does_not_poison():
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
+    def lin(traces, scale: float = Param(default=1.0)):
+        return traces * scale
+
+    @trace_attribute(name="rng", version="0.1.0", deterministic=False, vectorized=True)
+    def rng(traces, amp: float = Param(default=1.0)):
+        return traces
+
+    p = Pipeline()
+    a = Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model())
+    b = Node(spec=rng._eggseis_spec, params=rng._eggseis_spec.param_model(), enabled=False)
+    c = Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model())
+    for n in (a, b, c):
+        p.append(n)
+
+    assert p.deterministic_through(c.node_id) is True
+    clear_registry()

@@ -118,3 +118,10 @@ class Pipeline:
             ).encode()
             running = hashlib.blake2b(blob, digest_size=16).hexdigest()
         return running
+
+    def deterministic_through(self, node_id: str) -> bool:
+        """True iff every enabled node 0..node_id is deterministic. SOURCE_ID always True."""
+        if node_id == SOURCE_ID:
+            return True
+        tap_idx = self._index(node_id)
+        return all(n.spec.deterministic for n in self.nodes[: tap_idx + 1] if n.enabled)
