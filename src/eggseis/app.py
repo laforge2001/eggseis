@@ -281,9 +281,18 @@ class MainWindow(QMainWindow):
             self.section_viewer.clear_overlay()
 
     def _on_slice_changed(self, axis, index) -> None:
-        # show_slice clears overlay internally; if a plugin is active, recompute.
+        # show_slice clears overlay internally; if a plugin or pipeline is
+        # active, recompute. The dock-driven pipeline takes precedence over
+        # the menu-driven single-attribute path so we don't paint two
+        # overlays in sequence.
         self.section_viewer.show_slice(axis, index)
-        if self._active_plugin is not None:
+        pipeline = (
+            self._pipelines.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        if pipeline is not None and pipeline.nodes:
+            self._request_tap()
+        elif self._active_plugin is not None:
             self._recompute_overlay()
 
     def _on_params_changed(self, params) -> None:
