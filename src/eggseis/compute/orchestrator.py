@@ -87,11 +87,14 @@ class JobOrchestrator(QObject):
             "volume": volume,
             "axis": axis_enum,
             "index": index,
-            "input_section": input_section,
+            "input_section": None if input_section is None else input_section.copy(),
             "chain_hash": chain_hash,
         }
         key = make_cache_key(spec, params, volume, axis_enum, index, chain_hash=chain_hash)
         self._pending["key"] = key
+        # Cache-hit fast path: skip debounce, cancel any in-flight job
+        # (a late tilesReady/sectionReady would clobber this synchronous
+        # paint), and emit immediately.
         if spec.deterministic:
             cached = self._cache.get(key)
             if cached is not None:
@@ -121,10 +124,12 @@ class JobOrchestrator(QObject):
         index: int = req["index"]
 
         if axis is Axis.TIMESLICE:
-            self.sectionReady.emit(Job().id, volume.read_timeslice(index))
+            override = req["input_section"]
+            ts = override if override is not None else volume.read_timeslice(index)
+            self.sectionReady.emit(Job().id, ts)
             return
 
-        if req.get("input_section") is not None:
+        if req["input_section"] is not None:
             section = req["input_section"]
         else:
             section = (
