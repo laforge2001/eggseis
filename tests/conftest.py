@@ -121,3 +121,66 @@ def demo_project_path(tmp_path_factory, sample_mdio_path) -> Path:
         "wells: []\n"
     )
     return root
+
+
+@pytest.fixture
+def linear_spec():
+    """Deterministic trace * scalar. Vectorized batch path supported."""
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="Linear Scale", version="0.1.0", vectorized=True, deterministic=True)
+    def linear(traces: np.ndarray, scale: float = Param(default=1.0)) -> np.ndarray:
+        return traces * scale
+
+    yield linear._eggseis_spec
+    clear_registry()
+
+
+@pytest.fixture
+def raising_spec():
+    """Always raises. Exercises failure propagation."""
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="Raises", version="0.1.0", vectorized=False, deterministic=True)
+    def raises(trace: np.ndarray, _: float = Param(default=0.0)) -> np.ndarray:
+        raise RuntimeError("boom")
+
+    yield raises._eggseis_spec
+    clear_registry()
+
+
+@pytest.fixture
+def noise_spec():
+    """Non-deterministic. Exercises cache-poisoning."""
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="Noise", version="0.1.0", vectorized=True, deterministic=False)
+    def noise(traces: np.ndarray, amp: float = Param(default=1.0)) -> np.ndarray:
+        rng = np.random.default_rng()
+        return traces + rng.standard_normal(traces.shape).astype(np.float32) * amp
+
+    yield noise._eggseis_spec
+    clear_registry()
+
+
+@pytest.fixture
+def make_pipeline():
+    """Build a Pipeline from a list of (spec, params) tuples or bare specs."""
+    def _make(*specs_and_params):
+        from eggseis.pipeline.model import Node, Pipeline
+        p = Pipeline()
+        for entry in specs_and_params:
+            if isinstance(entry, tuple):
+                spec, params = entry
+            else:
+                spec = entry
+                params = spec.param_model()
+            p.append(Node(spec=spec, params=params))
+        return p
+    return _make
