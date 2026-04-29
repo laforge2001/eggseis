@@ -2,6 +2,29 @@
 
 All notable changes to eggseis are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [PEP 440](https://peps.python.org/pep-0440/).
 
+## [0.1.0a5] — 2026-04-29
+
+**M5 — "The pipeline chains" complete.**
+
+### Added
+- `eggseis.pipeline` package: `Pipeline`, `Node`, `PipelineExecutor`, `SOURCE_ID`.
+- Per-survey linear pipelines retained for the session (lost on app quit; M7 owns disk persistence).
+- `PipelineDock` widget (left dock area in `MainWindow`): list of nodes with enable checkbox + tap radio per row, selection-driven param panel, "+ Add plugin" picker.
+- Tap-anywhere: section viewer binds to the tap node's output rather than a single attribute. Source row (always non-removable, top of dock) paints raw amplitude.
+- `chain_hash`-keyed cache: each node's output is memoised with a Source-rooted hash so editing an upstream parameter invalidates only downstream nodes; revisiting the same params hits cache.
+- `deterministic=False` poisons the chain downstream as well as itself: deterministic nodes after a non-deterministic one are excluded from cache reads and writes via a `skip_cache_write` flag on `Job`.
+- Status bar surface: "Computing N of M: <plugin>…" while the executor is mid-plan; clears on `tapReady`.
+- Headless tests: pipeline model invariants (`chain_hash_for`, `nodes_up_to_tap`, `deterministic_through`, set-tap defensive shift), executor behaviour (cold execution, warm tap, mid-chain edit, disabled skip, non-det poison, failure halt, timeslice short-circuit, supersede cancellation, progress emission), and a 3-node GUI smoke (`bandpass → envelope → rms_amplitude`).
+
+### Changed
+- `CacheKey.params_hash` renamed to `chain_hash` (semantic-only; helper `params_hash` still computes a params-only digest for single-attribute callers).
+- `JobOrchestrator.request` accepts optional `input_section`, `chain_hash`, and `skip_cache_write` keyword arguments so the executor can drive it through a chain without re-reading the volume and without poisoning the cache for chain-level non-determinism.
+
+### Notes
+- Pipeline persistence to disk is intentionally deferred to M7.
+- Branching, multi-input nodes, and the visual node-graph canvas are M6.
+- Per-node param-widget integration with magicgui across multiple node instances is a known polish item; the dock currently falls back to an empty panel for nodes whose factory returns None.
+
 ## [0.1.0a4] — 2026-04-27
 
 **M4 — "The compute feels good" complete.**
