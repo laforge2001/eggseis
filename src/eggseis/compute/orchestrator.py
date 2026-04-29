@@ -94,6 +94,8 @@ class JobOrchestrator(QObject):
         }
         key = make_cache_key(spec, params, volume, axis_enum, index, chain_hash=chain_hash)
         self._pending["key"] = key
+        # Cache reads use spec.deterministic alone; chain-poisoned entries
+        # were never written, so a miss is the only possible outcome.
         # Cache-hit fast path: skip debounce, cancel any in-flight job
         # (a late tilesReady/sectionReady would clobber this synchronous
         # paint), and emit immediately.

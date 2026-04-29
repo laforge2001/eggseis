@@ -7,6 +7,17 @@ import numpy as np
 from eggseis.pipeline.model import Node, Pipeline
 
 
+def _make_lin_spec():
+    """Inline 'linear scale' plugin for tests that need to mix specs in one registry."""
+    from eggseis.plugin import Param, trace_attribute
+
+    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
+    def lin(traces, scale: float = Param(default=1.0)):
+        return traces * scale
+
+    return lin._eggseis_spec
+
+
 def test_empty_pipeline_taps_source_emits_raw(qtbot, fake_backend):
     from eggseis.compute.orchestrator import JobOrchestrator
     from eggseis.data import SeismicVolume
@@ -166,10 +177,7 @@ def test_plugin_failure_halts_plan_and_emits_failed(qtbot, fake_backend):
     from eggseis.plugin import Param, clear_registry, trace_attribute
 
     clear_registry()
-
-    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
-    def lin(traces, scale: float = Param(default=1.0)):
-        return traces * scale
+    lin_spec = _make_lin_spec()
 
     @trace_attribute(name="boom", version="0.1.0", deterministic=True, vectorized=False)
     def boom(trace, dummy: float = Param(default=0.0)):
@@ -180,7 +188,7 @@ def test_plugin_failure_halts_plan_and_emits_failed(qtbot, fake_backend):
     exe = PipelineExecutor(orch)
 
     p = Pipeline()
-    p.append(Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model(scale=2.0)))
+    p.append(Node(spec=lin_spec, params=lin_spec.param_model(scale=2.0)))
     p.append(Node(spec=boom._eggseis_spec, params=boom._eggseis_spec.param_model()))
     p.set_tap(p.nodes[-1].node_id)
 
@@ -199,13 +207,10 @@ def test_non_deterministic_node_skips_cache_writes_downstream(qtbot, fake_backen
     from eggseis.plugin import Param, clear_registry, trace_attribute
 
     clear_registry()
+    lin_spec = _make_lin_spec()
 
-    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
-    def lin(traces, scale: float = Param(default=1.0)):
-        return traces * scale
-
-    @trace_attribute(name="rng", version="0.1.0", deterministic=False, vectorized=True)
-    def rng(traces, amp: float = Param(default=1.0)):
+    @trace_attribute(name="passthrough", version="0.1.0", deterministic=False, vectorized=True)
+    def passthrough(traces, dummy: float = Param(default=1.0)):
         return traces
 
     volume = SeismicVolume(fake_backend, name="v")
@@ -213,9 +218,9 @@ def test_non_deterministic_node_skips_cache_writes_downstream(qtbot, fake_backen
     exe = PipelineExecutor(orch)
 
     p = Pipeline()
-    p.append(Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model(scale=2.0)))
-    p.append(Node(spec=rng._eggseis_spec, params=rng._eggseis_spec.param_model()))
-    p.append(Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model(scale=3.0)))
+    p.append(Node(spec=lin_spec, params=lin_spec.param_model(scale=2.0)))
+    p.append(Node(spec=passthrough._eggseis_spec, params=passthrough._eggseis_spec.param_model()))
+    p.append(Node(spec=lin_spec, params=lin_spec.param_model(scale=3.0)))
     p.set_tap(p.nodes[-1].node_id)
 
     with qtbot.waitSignal(exe.tapReady, timeout=5000):

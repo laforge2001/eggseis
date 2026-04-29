@@ -139,37 +139,6 @@ def linear_spec():
 
 
 @pytest.fixture
-def raising_spec():
-    """Always raises. Exercises failure propagation."""
-    from eggseis.plugin import Param, clear_registry, trace_attribute
-
-    clear_registry()
-
-    @trace_attribute(name="Raises", version="0.1.0", vectorized=False, deterministic=True)
-    def raises(trace: np.ndarray, _: float = Param(default=0.0)) -> np.ndarray:
-        raise RuntimeError("boom")
-
-    yield raises._eggseis_spec
-    clear_registry()
-
-
-@pytest.fixture
-def noise_spec():
-    """Non-deterministic. Exercises cache-poisoning."""
-    from eggseis.plugin import Param, clear_registry, trace_attribute
-
-    clear_registry()
-
-    @trace_attribute(name="Noise", version="0.1.0", vectorized=True, deterministic=False)
-    def noise(traces: np.ndarray, amp: float = Param(default=1.0)) -> np.ndarray:
-        rng = np.random.default_rng()
-        return traces + rng.standard_normal(traces.shape).astype(np.float32) * amp
-
-    yield noise._eggseis_spec
-    clear_registry()
-
-
-@pytest.fixture
 def make_pipeline():
     """Build a Pipeline from a list of (spec, params) tuples or bare specs."""
     def _make(*specs_and_params):
