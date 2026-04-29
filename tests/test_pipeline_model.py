@@ -82,3 +82,58 @@ def test_set_params_replaces_pydantic_model(linear_spec):
     new_params = linear_spec.param_model(scale=4.0)
     p.set_params(n.node_id, new_params)
     assert p.nodes[0].params.scale == 4.0
+
+
+def test_set_tap_to_node_id_succeeds_when_enabled(linear_spec):
+    from eggseis.pipeline.model import Node, Pipeline
+
+    p = Pipeline()
+    n = Node(spec=linear_spec, params=linear_spec.param_model())
+    p.append(n)
+    p.set_tap(n.node_id)
+    assert p.tap_node_id == n.node_id
+
+
+def test_set_tap_to_disabled_node_shifts_upstream(linear_spec):
+    from eggseis.pipeline.model import Node, Pipeline
+
+    p = Pipeline()
+    a = Node(spec=linear_spec, params=linear_spec.param_model())
+    b = Node(spec=linear_spec, params=linear_spec.param_model(), enabled=False)
+    p.append(a)
+    p.append(b)
+    p.set_tap(b.node_id)
+    assert p.tap_node_id == a.node_id
+
+
+def test_set_tap_falls_through_to_source_when_no_enabled_ancestor(linear_spec):
+    from eggseis.pipeline.model import SOURCE_ID, Node, Pipeline
+
+    p = Pipeline()
+    a = Node(spec=linear_spec, params=linear_spec.param_model(), enabled=False)
+    b = Node(spec=linear_spec, params=linear_spec.param_model(), enabled=False)
+    p.append(a)
+    p.append(b)
+    p.set_tap(b.node_id)
+    assert p.tap_node_id == SOURCE_ID
+
+
+def test_disable_tapped_node_auto_shifts_tap(linear_spec):
+    from eggseis.pipeline.model import Node, Pipeline
+
+    p = Pipeline()
+    a = Node(spec=linear_spec, params=linear_spec.param_model())
+    b = Node(spec=linear_spec, params=linear_spec.param_model())
+    p.append(a)
+    p.append(b)
+    p.set_tap(b.node_id)
+    p.set_enabled(b.node_id, False)
+    assert p.tap_node_id == a.node_id
+
+
+def test_set_tap_to_source_always_allowed(linear_spec):
+    from eggseis.pipeline.model import SOURCE_ID, Pipeline
+
+    p = Pipeline()
+    p.set_tap(SOURCE_ID)
+    assert p.tap_node_id == SOURCE_ID

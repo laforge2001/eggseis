@@ -51,6 +51,23 @@ class Pipeline:
 
     def set_enabled(self, node_id: str, on: bool) -> None:
         self.nodes[self._index(node_id)].enabled = on
+        if not on and self.tap_node_id == node_id:
+            self.set_tap(node_id)  # set_tap handles the upstream shift
 
     def set_params(self, node_id: str, params: BaseModel) -> None:
         self.nodes[self._index(node_id)].params = params
+
+    def set_tap(self, node_id: str) -> None:
+        if node_id == SOURCE_ID:
+            self.tap_node_id = SOURCE_ID
+            return
+        target = self.nodes[self._index(node_id)]
+        if target.enabled:
+            self.tap_node_id = node_id
+            return
+        target_idx = self._index(node_id)
+        for i in range(target_idx - 1, -1, -1):
+            if self.nodes[i].enabled:
+                self.tap_node_id = self.nodes[i].node_id
+                return
+        self.tap_node_id = SOURCE_ID
