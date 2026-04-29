@@ -310,3 +310,41 @@ def test_progress_signal_fires_per_node(qtbot, fake_backend, linear_spec, make_p
     assert len(seen) == 3
     assert [s[0] for s in seen] == [1, 2, 3]
     assert all(s[1] == 3 for s in seen)
+
+
+def test_orphan_node_after_plugin_removed_runs_via_held_spec_reference(qtbot, fake_backend):
+    """Plugin reload mid-session: clearing the registry must not corrupt
+    in-flight pipelines. Nodes hold direct PluginSpec references, so the
+    executor still produces correct output."""
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    # Build a chain whose spec we then orphan from the registry.
+    lin_spec = _make_lin_spec()
+    node_params = lin_spec.param_model(scale=2.0)
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=lin_spec, params=node_params))
+    p.set_tap(p.nodes[0].node_id)
+
+    # Simulate "Reload Plugins": clear_registry() removes the global mapping,
+    # but the Node retains its direct spec reference.
+    from eggseis.plugin import clear_registry, registered
+    clear_registry()
+    assert registered() == ()  # registry is empty post-clear
+    assert lin_spec is p.nodes[0].spec  # but the Node still holds the spec
+
+    # Executor runs successfully against the orphaned spec.
+    with qtbot.waitSignal(exe.tapReady, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    np.testing.assert_allclose(
+        arr,
+        volume.read_inline(volume.geometry.inline_min) * 2.0,
+        rtol=1e-5,
+    )
