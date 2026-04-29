@@ -22,6 +22,7 @@ class PipelineExecutor(QObject):
     tapReady = Signal(int, object)               # job_id, ndarray
     intermediateReady = Signal(int, str, object)  # job_id, node_id, ndarray
     failed = Signal(int, str)                     # job_id, message
+    progress = Signal(int, int, str)             # current_index (1-based), total, plugin_name
 
     def __init__(self, orchestrator: JobOrchestrator) -> None:
         super().__init__()
@@ -153,6 +154,7 @@ class PipelineExecutor(QObject):
                 self._active_job_id = None
                 self.failed.emit(job_id, f"{node.spec.name}: {message}")
 
+            self.progress.emit(idx + 1, len(cold_nodes), node.spec.name)
             self._active_on_ready = on_ready
             self._active_on_failed = on_failed
             self._orch.sectionReady.connect(on_ready)

@@ -287,3 +287,26 @@ def test_new_request_supersedes_in_flight(qtbot, fake_backend):
         arr, volume.read_inline(volume.geometry.inline_min) * 4.0, rtol=1e-5
     )
     clear_registry()
+
+
+def test_progress_signal_fires_per_node(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(linear_spec, linear_spec, linear_spec)
+    p.set_tap(p.nodes[-1].node_id)
+
+    seen: list[tuple[int, int, str]] = []
+    exe.progress.connect(lambda *args: seen.append(args))
+
+    with qtbot.waitSignal(exe.tapReady, timeout=10_000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    assert len(seen) == 3
+    assert [s[0] for s in seen] == [1, 2, 3]
+    assert all(s[1] == 3 for s in seen)

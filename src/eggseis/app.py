@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self._executor = PipelineExecutor(self._compute)
         self._executor.tapReady.connect(self._on_tap_ready)
         self._executor.failed.connect(self._on_chain_failed)
+        self._executor.progress.connect(self._on_chain_progress)
 
         self._pipelines: dict[str, Pipeline] = {}
         self._active_survey_id: str | None = None
@@ -372,8 +373,12 @@ class MainWindow(QMainWindow):
             self.section_viewer.current_index,
         )
 
+    def _on_chain_progress(self, current: int, total: int, name: str) -> None:
+        self.statusBar().showMessage(f"Computing {current} of {total}: {name}…")
+
     def _on_tap_ready(self, _job_id: int, arr) -> None:
         self.section_viewer.set_overlay(arr, partial=False)
+        self.statusBar().clearMessage()
 
     def _on_chain_failed(self, _job_id: int, message: str) -> None:
         self._compute_errors.append(("chain", message))
