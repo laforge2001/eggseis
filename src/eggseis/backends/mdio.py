@@ -29,6 +29,11 @@ class MDIOBackend:
         self._sample_dim = self._resolve_dim(SAMPLE_DIM_CANDIDATES, "time/depth")
 
         self._geometry = self._build_geometry()
+        # Snapshot identity once. Surveys are read-only within a session;
+        # recomputing per `make_cache_key` call wastes two syscalls.
+        p = self.path.resolve()
+        st = p.stat()
+        self._version: tuple = ("mdio", str(p), st.st_size, st.st_mtime_ns)
 
     def _resolve_data_variable(self) -> str:
         default = self._ds.attrs.get("defaultVariableName")
@@ -78,6 +83,17 @@ class MDIOBackend:
     @property
     def dtype(self) -> np.dtype:
         return self._var.dtype
+
+    @property
+    def version(self) -> tuple:
+        """`(backend_kind, resolved_path, st_size, st_mtime_ns)` — used as a cache key.
+
+        Snapshot taken at construction. For MDIO, `path` is a directory; its
+        `st_mtime_ns` updates whenever immediate children change. Adequate
+        for read-only surveys; in-place chunk edits at identical size +
+        mtime would falsely hit the cache, and that is acceptable for v1.0.
+        """
+        return self._version
 
     def read_inline(self, inline: int) -> np.ndarray:
         return (

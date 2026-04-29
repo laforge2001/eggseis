@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
 from eggseis.axes import Axis
 from eggseis.backends.mdio import MDIOBackend
 from eggseis.colormaps import LUTS_AVAILABLE
+from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
 from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
-from eggseis.plugin_runner import run_on_section
 from eggseis.plugin_template import create_template, open_in_editor
 from eggseis.project import Project
 from eggseis.viewers.section import DEFAULT_LUT, SectionViewer
@@ -64,7 +64,13 @@ class MainWindow(QMainWindow):
 
         self._project: Project | None = None
         self._active_plugin: PluginSpec | None = None
+        self._active_params = None
         self._plugin_actions: dict[str, QAction] = {}
+        self._compute = JobOrchestrator()
+        self._compute_errors: list[tuple[str, str]] = []
+        self._compute.tilesReady.connect(self._on_tiles_ready)
+        self._compute.sectionReady.connect(self._on_section_ready)
+        self._compute.failed.connect(self._on_compute_failed)
         self._build_menus()
         self._wire_signals()
         self._build_shortcuts()
@@ -125,6 +131,12 @@ class MainWindow(QMainWindow):
             a_errors.setText(f"&Plugin Errors… ({len(self._plugin_load_errors)})")
         self._plugin_errors_action = a_errors
         m_help.addAction(a_errors)
+
+        a_compute_errors = QAction("&Compute Errors…", self)
+        a_compute_errors.triggered.connect(self._on_show_compute_errors)
+        m_help.addAction(a_compute_errors)
+        self._compute_errors_action = a_compute_errors
+
         if self._plugin_load_errors:
             # Surface a transient hint so users don't miss it.
             self.statusBar().showMessage(
@@ -166,21 +178,37 @@ class MainWindow(QMainWindow):
         except (FileNotFoundError, ValueError) as exc:
             QMessageBox.critical(self, "Open Project failed", str(exc))
 
-    def _on_show_plugin_errors(self) -> None:
-        if not self._plugin_load_errors:
-            QMessageBox.information(
-                self, "Plugin Errors", "No plugin load errors recorded."
-            )
+    def _show_errors_dialog(
+        self, title: str, summary: str, empty_message: str, body_lines: list[str]
+    ) -> None:
+        if not body_lines:
+            QMessageBox.information(self, title, empty_message)
             return
-        body = "\n\n".join(
-            f"• {err.source}\n    {err.message}" for err in self._plugin_load_errors
-        )
         box = QMessageBox(self)
-        box.setWindowTitle("Plugin Errors")
+        box.setWindowTitle(title)
         box.setIcon(QMessageBox.Warning)
-        box.setText(f"{len(self._plugin_load_errors)} plugin(s) failed to load:")
-        box.setDetailedText(body)
+        box.setText(summary)
+        box.setDetailedText("\n\n".join(body_lines))
         box.exec()
+
+    def _on_show_plugin_errors(self) -> None:
+        self._show_errors_dialog(
+            title="Plugin Errors",
+            summary=f"{len(self._plugin_load_errors)} plugin(s) failed to load:",
+            empty_message="No plugin load errors recorded.",
+            body_lines=[
+                f"• {err.source}\n    {err.message}"
+                for err in self._plugin_load_errors
+            ],
+        )
+
+    def _on_show_compute_errors(self) -> None:
+        self._show_errors_dialog(
+            title="Compute Errors",
+            summary=f"{len(self._compute_errors)} compute error(s) this session:",
+            empty_message="No compute errors recorded this session.",
+            body_lines=[f"• {name}\n    {msg}" for name, msg in self._compute_errors],
+        )
 
     def _on_new_plugin(self) -> None:
         name, ok = QInputDialog.getText(
@@ -222,6 +250,7 @@ class MainWindow(QMainWindow):
 
     def _activate_plugin(self, spec: PluginSpec | None) -> None:
         self._active_plugin = spec
+        self._active_params = None
         self.param_dock.set_plugin(spec)
         if spec is None:
             self.section_viewer.clear_overlay()
@@ -235,23 +264,38 @@ class MainWindow(QMainWindow):
     def _on_params_changed(self, params) -> None:
         if self._active_plugin is None:
             return
+        self._active_params = params
         self._recompute_overlay(params)
 
     def _recompute_overlay(self, params=None) -> None:
         spec = self._active_plugin
-        if spec is None or not self.section_viewer.has_volume:
+        volume = self.section_viewer.volume
+        if spec is None or volume is None:
             return
         if params is None:
-            params = spec.param_model()
-        try:
-            arr = run_on_section(
-                spec,
-                params,
-                self.section_viewer._volume,
-                self.section_viewer.current_axis,
-                self.section_viewer.current_index,
+            params = (
+                self._active_params if self._active_params is not None
+                else spec.param_model()
             )
-        except Exception as exc:
-            self.statusBar().showMessage(f"{spec.name} failed: {exc}", 5000)
-            return
-        self.section_viewer.set_overlay(arr)
+        self._compute.request(
+            spec,
+            params,
+            volume,
+            self.section_viewer.current_axis,
+            self.section_viewer.current_index,
+        )
+
+    def _on_tiles_ready(self, _job_id: int, buffer, _ranges) -> None:
+        self.section_viewer.set_overlay(buffer, partial=True)
+
+    def _on_section_ready(self, _job_id: int, arr) -> None:
+        self.section_viewer.set_overlay(arr, partial=False)
+
+    def _on_compute_failed(self, _job_id: int, message: str) -> None:
+        spec = self._active_plugin
+        name = spec.name if spec else "compute"
+        self._compute_errors.append((name, message))
+        self._compute_errors_action.setText(
+            f"&Compute Errors… ({len(self._compute_errors)})"
+        )
+        self.statusBar().showMessage(f"{name} failed: {message}", 5000)

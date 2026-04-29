@@ -64,6 +64,10 @@ class FakeBackend:
         x = (xline - self._geometry.xline_min) // self._geometry.xline_step
         return self._cube[i, x, :]
 
+    @property
+    def version(self) -> tuple:
+        return ("fake", id(self))
+
 
 @pytest.fixture
 def fake_backend() -> FakeBackend:

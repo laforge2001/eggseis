@@ -11,7 +11,7 @@ from eggseis.builtins.instantaneous_frequency import instantaneous_frequency
 from eggseis.builtins.rms_amplitude import rms_amplitude
 from eggseis.data import SeismicVolume
 from eggseis.plugin import Param, clear_registry, trace_attribute
-from eggseis.plugin_runner import run_on_section
+from eggseis.plugin_runner import compute_tile, run_on_section
 
 
 @pytest.fixture
@@ -95,3 +95,28 @@ def test_non_vectorized_plugin_called_per_trace(volume):
     inline = volume.read_inline(volume.geometry.inline_min)
     run_on_section(spec, spec.param_model(), volume, "inline", volume.geometry.inline_min)
     assert call_count["n"] == inline.shape[0]
+
+
+def test_compute_tile_writes_only_requested_range(fake_backend):
+    vol = SeismicVolume(fake_backend)
+    section = vol.read_inline(vol.geometry.inline_min)
+    out = np.zeros_like(section, dtype=np.float32)
+
+    spec = envelope._eggseis_spec
+    context = {"sample_rate_ms": vol.geometry.sample_rate_ms,
+               "axis": "inline", "index": vol.geometry.inline_min}
+    compute_tile(spec, {}, section, context, start=2, stop=5, out=out)
+
+    # Rows 2..4 written, others untouched.
+    assert (out[:2] == 0).all()
+    assert (out[5:] == 0).all()
+    assert (out[2:5] != 0).any()
+
+
+def test_vectorized_envelope_matches_scalar(fake_backend):
+    vol = SeismicVolume(fake_backend)
+    spec = envelope._eggseis_spec
+    out = run_on_section(spec, spec.param_model(), vol, "inline", vol.geometry.inline_min)
+    section = vol.read_inline(vol.geometry.inline_min)
+    expected = np.stack([np.abs(hilbert(section[i])) for i in range(section.shape[0])])
+    np.testing.assert_allclose(out, expected.astype(np.float32), rtol=1e-5)

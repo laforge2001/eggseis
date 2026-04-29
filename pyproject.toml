@@ -72,6 +72,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # allow en-dash, ×, etc. in user-facin
 "src/eggseis/cli.py" = ["B008"]  # typer.Argument/Option in defaults is idiomatic
 "src/eggseis/widgets/*.py" = ["N815"]  # Qt signals are camelCase by convention
 "src/eggseis/viewers/*.py" = ["N815"]
+"src/eggseis/compute/*.py" = ["N815"]  # Qt signals are camelCase by convention
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

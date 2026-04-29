@@ -142,3 +142,26 @@ sudo apt-get install -y libegl1 libxkbcommon0 libdbus-1-3 libxcb-cursor0
 **`QApplication` fails on macOS** — make sure you're not running tests inside another QApplication (e.g. an IDE plugin). pytest-qt's `qapp` fixture already handles this in tests; outside tests, instantiate `QApplication.instance() or QApplication(sys.argv)`.
 
 **`./scripts/test.sh demo` shows an empty viewer** — double-click the survey under the "Surveys" branch in the project tree. Single-click only selects it.
+
+## Compute model (M4+)
+
+When you select an attribute in the GUI, the section is computed off the GUI
+thread by `eggseis.compute.JobOrchestrator`:
+
+1. `MainWindow._recompute_overlay` calls `orchestrator.request(...)`.
+2. The request is debounced 150 ms; rapid slider chatter coalesces into one
+   dispatch.
+3. On dispatch the orchestrator splits the section into 64-trace tiles and
+   submits one `TileRunnable` per tile to `QThreadPool.globalInstance()`.
+   Tiles are ordered center-out so the visible middle of the section appears
+   first.
+4. As tiles complete, the orchestrator coalesces them into a `tilesReady`
+   emission every 50 ms; the section viewer paints partial results.
+5. When the last tile lands, `sectionReady` fires and the result is stored
+   in `SectionLRU` (default 500 MB, override with `EGGSEIS_CACHE_BYTES`).
+6. Identical subsequent requests serve from cache and return synchronously
+   without ever touching a worker.
+
+Library/CLI paths (`eggseis info`, `eggseis dump-inline`,
+`eggseis.plugin_runner.run_on_section`) stay synchronous — the orchestrator
+is GUI-only.

@@ -243,3 +243,19 @@ def my_attr(
     out = ...                                  # your work here
     return out.astype(np.float32)
 ```
+
+## Determinism and caching
+
+By default, plugins are `deterministic=True`, which means a given plugin +
+parameters + slice combination always produces the same bytes. Eggseis caches
+those results in memory and reuses them when the user pans back.
+
+If your plugin reads a clock, calls an RNG, or otherwise produces different
+output for identical inputs, mark it as non-deterministic so it is never
+cached:
+
+```python
+@trace_attribute(name="My Random Filter", deterministic=False)
+def my_random(trace, gain: float = Param(1.0)):
+    ...
+```
