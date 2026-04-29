@@ -37,3 +37,33 @@ def test_add_plugin_appends_node(qtbot, linear_spec, make_pipeline):
     assert dock.list_widget.count() == 2  # Source + new node
     assert len(p.nodes) == 1
     assert p.nodes[0].spec is linear_spec
+
+
+def test_select_row_swaps_param_panel(qtbot, linear_spec, make_pipeline):
+    from PySide6.QtWidgets import QLabel
+
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock(param_widget_factory=lambda node: QLabel(node.node_id))
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec, linear_spec)
+    dock.bind(p)
+
+    # Select first user node (row 1; row 0 is Source).
+    dock.list_widget.setCurrentRow(1)
+    assert isinstance(dock.param_host.currentWidget(), QLabel)
+    assert dock.param_host.currentWidget().text() == p.nodes[0].node_id
+
+    # Switch to second.
+    dock.list_widget.setCurrentRow(2)
+    assert dock.param_host.currentWidget().text() == p.nodes[1].node_id
+
+
+def test_source_row_shows_empty_param_panel(qtbot, linear_spec, make_pipeline):
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock(param_widget_factory=lambda node: None)
+    qtbot.addWidget(dock)
+    dock.bind(make_pipeline(linear_spec))
+    dock.list_widget.setCurrentRow(0)  # Source
+    assert dock.param_host.currentWidget() is dock._empty_panel
