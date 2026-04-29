@@ -76,3 +76,22 @@ def test_lru_drops_silently_when_value_exceeds_budget():
     cache.put(_key(0), big)
     assert len(cache) == 0
     assert cache.nbytes == 0
+
+
+def test_make_cache_key_uses_chain_hash_override_when_provided(fake_backend):
+    from eggseis.compute.cache import make_cache_key
+    from eggseis.data import SeismicVolume
+
+    class _StubSpec:
+        id = "p"
+        version = "0.1.0"
+
+    class _StubParams:
+        def model_dump(self):
+            return {"a": 1}
+
+    volume = SeismicVolume(fake_backend, name="v")
+    key = make_cache_key(
+        _StubSpec(), _StubParams(), volume, "inline", 0, chain_hash="deadbeef"
+    )
+    assert key.chain_hash == "deadbeef"
