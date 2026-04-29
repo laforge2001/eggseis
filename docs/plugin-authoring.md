@@ -259,3 +259,9 @@ cached:
 def my_random(trace, gain: float = Param(1.0)):
     ...
 ```
+
+> **In a pipeline:** a `deterministic=False` node poisons every node
+> downstream of itself for caching purposes. The plugin still runs;
+> outputs are simply never memoised, so revisiting the same params
+> and slice always recomputes. Prefer `deterministic=True` whenever
+> your plugin's output is a pure function of its input and parameters.

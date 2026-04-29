@@ -165,3 +165,43 @@ thread by `eggseis.compute.JobOrchestrator`:
 Library/CLI paths (`eggseis info`, `eggseis dump-inline`,
 `eggseis.plugin_runner.run_on_section`) stay synchronous — the orchestrator
 is GUI-only.
+
+## How pipelines work in the GUI (M5+)
+
+eggseis lets the user stack multiple trace-local plugins into a linear
+pipeline per survey. The dock at the left of the main window lists the
+chain; each node has an enable checkbox and a tap radio. The section
+viewer paints the output of whichever node is tapped (Source = raw
+amplitude).
+
+Mechanics:
+
+- **Per-survey scope.** Each opened survey gets its own `Pipeline`,
+  kept in memory for the session. Closing a survey doesn't lose the
+  chain; opening a different survey shows that survey's chain (which
+  may be empty). Persistence to disk is M7's job.
+
+- **Cache via `chain_hash`.** Each node has a content-addressed key
+  that folds in `(plugin_id, plugin_version, params, parent_chain_hash)`.
+  The M4 `SectionLRU` is reused directly — there is no separate
+  pipeline cache. Editing one node's params leaves all upstream cache
+  entries intact; downstream entries miss naturally because their
+  `chain_hash` differs.
+
+- **Lazy recompute.** Only the path from Source to the current tap
+  runs. If you tap node 1, nodes 2–5 stay dirty until you tap one of
+  them; then the cold suffix runs.
+
+- **Disabled nodes** are skipped at execution time (they pass their
+  parent's output through unchanged) and their tap radio is greyed.
+  The cache key reflects the skip, so disabling a node does not
+  invalidate cached entries for an upstream node — only downstream
+  nodes re-key.
+
+- **Non-deterministic plugins** (`deterministic=False`) and every
+  node downstream of one are excluded from cache reads and writes.
+  The plugin itself runs normally; results are simply not memoised.
+
+- **Timeslice axis** bypasses the chain entirely. Trace-local plugins
+  do not apply to a horizontal slice; the viewer paints raw amplitude
+  until the user switches to inline or xline.

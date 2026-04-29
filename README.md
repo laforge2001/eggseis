@@ -111,7 +111,7 @@ The roadmap is:
 - **M2** — Section viewer *(complete, [v0.1.0a2](CHANGELOG.md))*
 - **M3** — Plugin API *(complete, [v0.1.0a3](CHANGELOG.md); authoring guide in [`docs/plugin-authoring.md`](docs/plugin-authoring.md))*
 - **M4** — Compute engine *(complete, [v0.1.0a4](CHANGELOG.md); threading, debounce, in-memory cache)*
-- **M5** — Plugin pipelines (linear chain + tap-anywhere)
+- **M5** — Pipeline chain *(complete, [v0.1.0a5](CHANGELOG.md); list-style dock, tap-anywhere, lazy recompute, chain_hash cache)*
 - **M6** — Plugin graphs (DAG + visual node canvas)
 - **M7** — Horizons and wells
 - **M8** — Volume viewer
