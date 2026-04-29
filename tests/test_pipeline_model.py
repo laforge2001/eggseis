@@ -170,7 +170,9 @@ def test_source_hash_changes_with_volume_version(linear_spec):
     assert h1 != h2
 
 
-def test_node_hash_stable_across_param_orderings(linear_spec):
+def test_node_hash_independent_of_pipeline_instance(linear_spec):
+    # Two separate Pipeline instances with identical plugin + params yield the same hash,
+    # confirming that node_id (a UUID assigned per-instance) does not influence the result.
     p1 = Pipeline()
     p1.append(Node(spec=linear_spec, params=linear_spec.param_model(scale=2.0)))
     p2 = Pipeline()
@@ -240,3 +242,10 @@ def test_duplicate_plugin_same_params_same_position_yields_same_hash(linear_spec
     assert p1.chain_hash_for(p1.nodes[0].node_id, vv) == p2.chain_hash_for(
         p2.nodes[0].node_id, vv
     )
+
+
+def test_chain_hash_for_unknown_node_id_raises(linear_spec):
+    p = Pipeline()
+    p.append(Node(spec=linear_spec, params=linear_spec.param_model()))
+    with pytest.raises(KeyError):
+        p.chain_hash_for("not-a-real-node-id", ("mdio", "/x", 1, 1))

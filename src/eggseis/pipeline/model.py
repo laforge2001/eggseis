@@ -97,7 +97,7 @@ class Pipeline:
         parent_hash). Disabled nodes act as identity (parent passes through).
         """
         source_blob = json.dumps(
-            list(volume_version), sort_keys=True, separators=(",", ":")
+            list(volume_version), separators=(",", ":")
         ).encode()
         running = hashlib.blake2b(source_blob, digest_size=16).hexdigest()
         if node_id == SOURCE_ID:
@@ -114,7 +114,7 @@ class Pipeline:
                 running,
             )
             blob = json.dumps(
-                list(payload), sort_keys=True, separators=(",", ":")
+                list(payload), separators=(",", ":")
             ).encode()
             running = hashlib.blake2b(blob, digest_size=16).hexdigest()
         return running
