@@ -121,3 +121,34 @@ def test_source_tap_radio_present_and_default(qtbot, linear_spec, make_pipeline)
     p = make_pipeline(linear_spec)
     dock.bind(p)
     assert dock.source_tap_radio.isChecked() is True
+
+
+def test_remove_node_via_method(qtbot, linear_spec, make_pipeline):
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock()
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec, linear_spec)
+    dock.bind(p)
+
+    target_id = p.nodes[0].node_id
+    with qtbot.waitSignal(dock.pipelineChanged, timeout=1000):
+        dock.remove_node(target_id)
+    assert len(p.nodes) == 1
+    assert p.nodes[0].node_id != target_id
+
+
+def test_drag_reorder_updates_pipeline_order(qtbot, linear_spec, make_pipeline):
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock()
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec, linear_spec, linear_spec)
+    dock.bind(p)
+    original_ids = [n.node_id for n in p.nodes]
+
+    with qtbot.waitSignal(dock.pipelineChanged, timeout=1000):
+        dock.move_row(3, 1)
+
+    new_ids = [n.node_id for n in p.nodes]
+    assert new_ids == [original_ids[2], original_ids[0], original_ids[1]]

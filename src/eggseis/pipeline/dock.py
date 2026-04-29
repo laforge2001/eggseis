@@ -100,6 +100,25 @@ class PipelineDock(QDockWidget):
         self._refresh()
         self.pipelineChanged.emit()
 
+    def remove_node(self, node_id: str) -> None:
+        if self._pipeline is None:
+            return
+        if node_id == SOURCE_ID:
+            return
+        self._pipeline.remove(node_id)
+        self._refresh()
+        self.pipelineChanged.emit()
+
+    def move_row(self, from_row: int, to_row: int) -> None:
+        """Move list row from_row -> to_row. Both must be > 0; row 0 is Source."""
+        if self._pipeline is None or from_row <= 0 or to_row <= 0:
+            return
+        node_id = self.list_widget.item(from_row).data(Qt.UserRole)
+        target_index_in_pipeline = to_row - 1
+        self._pipeline.move(node_id, target_index_in_pipeline)
+        self._refresh()
+        self.pipelineChanged.emit()
+
     def _refresh(self) -> None:
         for w in list(self._param_widgets.values()):
             self.param_host.removeWidget(w)
