@@ -152,3 +152,29 @@ def test_drag_reorder_updates_pipeline_order(qtbot, linear_spec, make_pipeline):
 
     new_ids = [n.node_id for n in p.nodes]
     assert new_ids == [original_ids[2], original_ids[0], original_ids[1]]
+
+
+def test_param_change_updates_pipeline_and_emits_changed(qtbot, linear_spec, make_pipeline):
+    from PySide6.QtCore import Signal as QtSignal
+    from PySide6.QtWidgets import QWidget
+
+    from eggseis.pipeline.dock import PipelineDock
+
+    class FakeWidget(QWidget):
+        paramsChanged = QtSignal(object)  # noqa: N815
+
+    def factory(node):
+        return FakeWidget()
+
+    dock = PipelineDock(param_widget_factory=factory)
+    qtbot.addWidget(dock)
+    p = make_pipeline((linear_spec, linear_spec.param_model(scale=1.0)))
+    dock.bind(p)
+
+    new_params = linear_spec.param_model(scale=9.0)
+    target_widget = dock._param_widgets[p.nodes[0].node_id]
+
+    with qtbot.waitSignal(dock.pipelineChanged, timeout=1000):
+        target_widget.paramsChanged.emit(new_params)
+
+    assert p.nodes[0].params.scale == 9.0

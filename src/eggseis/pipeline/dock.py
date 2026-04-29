@@ -151,6 +151,12 @@ class PipelineDock(QDockWidget):
                 if widget is not None:
                     self.param_host.addWidget(widget)
                     self._param_widgets[node.node_id] = widget
+                    if hasattr(widget, "paramsChanged"):
+                        widget.paramsChanged.connect(
+                            lambda new_params, nid=node.node_id: (
+                                self._on_params_changed(nid, new_params)
+                            )
+                        )
 
         self._sync_tap_radio_from_pipeline()
 
@@ -199,6 +205,12 @@ class PipelineDock(QDockWidget):
         row = self._row_widgets.get(target)
         if row is not None:
             row.tap_radio.setChecked(True)
+
+    def _on_params_changed(self, node_id: str, new_params) -> None:
+        if self._pipeline is None:
+            return
+        self._pipeline.set_params(node_id, new_params)
+        self.pipelineChanged.emit()
 
     def _on_row_changed(self, row: int) -> None:
         if row < 0:
