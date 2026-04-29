@@ -67,3 +67,57 @@ def test_source_row_shows_empty_param_panel(qtbot, linear_spec, make_pipeline):
     dock.bind(make_pipeline(linear_spec))
     dock.list_widget.setCurrentRow(0)  # Source
     assert dock.param_host.currentWidget() is dock._empty_panel
+
+
+def test_enable_checkbox_toggles_node(qtbot, linear_spec, make_pipeline):
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock()
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec)
+    dock.bind(p)
+
+    row_widget = dock.row_widget(p.nodes[0].node_id)
+    with qtbot.waitSignal(dock.pipelineChanged, timeout=1000):
+        row_widget.enable_checkbox.setChecked(False)
+    assert p.nodes[0].enabled is False
+
+
+def test_disable_greys_tap_radio(qtbot, linear_spec, make_pipeline):
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock()
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec)
+    dock.bind(p)
+
+    row_widget = dock.row_widget(p.nodes[0].node_id)
+    assert row_widget.tap_radio.isEnabled() is True
+    row_widget.enable_checkbox.setChecked(False)
+    assert row_widget.tap_radio.isEnabled() is False
+
+
+def test_clicking_tap_radio_emits_tapChanged(qtbot, linear_spec, make_pipeline):  # noqa: N802
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock()
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec)
+    dock.bind(p)
+
+    row_widget = dock.row_widget(p.nodes[0].node_id)
+    with qtbot.waitSignal(dock.tapChanged, timeout=1000) as blocker:
+        row_widget.tap_radio.setChecked(True)
+    (new_tap,) = blocker.args
+    assert new_tap == p.nodes[0].node_id
+    assert p.tap_node_id == p.nodes[0].node_id
+
+
+def test_source_tap_radio_present_and_default(qtbot, linear_spec, make_pipeline):
+    from eggseis.pipeline.dock import PipelineDock
+
+    dock = PipelineDock()
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec)
+    dock.bind(p)
+    assert dock.source_tap_radio.isChecked() is True
