@@ -157,3 +157,36 @@ def test_disabled_middle_node_is_skipped_in_chain(
     _job_id, arr = blocker.args
     expected = volume.read_inline(volume.geometry.inline_min) * 6.0  # 2.0 * 3.0
     np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+
+def test_plugin_failure_halts_plan_and_emits_failed(qtbot, fake_backend):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
+    def lin(traces, scale: float = Param(default=1.0)):
+        return traces * scale
+
+    @trace_attribute(name="boom", version="0.1.0", deterministic=True, vectorized=False)
+    def boom(trace, dummy: float = Param(default=0.0)):
+        raise RuntimeError("intentional")
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model(scale=2.0)))
+    p.append(Node(spec=boom._eggseis_spec, params=boom._eggseis_spec.param_model()))
+    p.set_tap(p.nodes[-1].node_id)
+
+    with qtbot.waitSignal(exe.failed, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, message = blocker.args
+    assert "boom" in message  # plugin name appears in surfaced error
+
+    clear_registry()
