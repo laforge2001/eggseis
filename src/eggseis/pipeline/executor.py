@@ -14,7 +14,7 @@ from PySide6.QtCore import QObject, Signal
 from eggseis.axes import Axis
 from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
-from eggseis.pipeline.model import SOURCE_ID, Pipeline
+from eggseis.pipeline.model import SOURCE_ID, Node, Pipeline
 
 
 class PipelineExecutor(QObject):
@@ -41,14 +41,81 @@ class PipelineExecutor(QObject):
         axis_enum = Axis(axis) if not isinstance(axis, Axis) else axis
         plan = pipeline.nodes_up_to_tap()
 
-        # Source tap or empty plan: synchronous raw read.
+        # Source / empty plan: raw paint.
         if not plan or pipeline.tap_node_id == SOURCE_ID:
             raw = self._read_raw(volume, axis_enum, index)
             self.tapReady.emit(self._new_job_id(), raw)
             return
 
-        # TODO Task 12+: cold-suffix execution.
-        raise NotImplementedError
+        # Resolve cold suffix: walk from tap backward, find deepest cache hit.
+        from eggseis.compute.cache import make_cache_key
+
+        cache = self._orch.cache
+        starting_input: np.ndarray | None = None
+        cold_start_idx = 0
+        for i in range(len(plan) - 1, -1, -1):
+            node = plan[i]
+            chain_hash = pipeline.chain_hash_for(node.node_id, volume.version)
+            key = make_cache_key(
+                node.spec, node.params, volume, axis_enum, index,
+                chain_hash=chain_hash,
+            )
+            if pipeline.deterministic_through(node.node_id):
+                cached = cache.get(key)
+                if cached is not None:
+                    if i == len(plan) - 1:
+                        # Tap node itself is cached.
+                        self.tapReady.emit(self._new_job_id(), cached)
+                        return
+                    starting_input = cached
+                    cold_start_idx = i + 1
+                    break
+
+        if starting_input is None:
+            starting_input = self._read_raw(volume, axis_enum, index)
+            cold_start_idx = 0
+
+        cold_nodes = plan[cold_start_idx:]
+        self._run_chain(pipeline, volume, axis_enum, index, cold_nodes, starting_input)
+
+    def _run_chain(
+        self,
+        pipeline: Pipeline,
+        volume: SeismicVolume,
+        axis: Axis,
+        index: int,
+        cold_nodes: list[Node],
+        starting_input: np.ndarray,
+    ) -> None:
+        """Execute cold_nodes serially. Each node's output feeds the next."""
+        job_id = self._new_job_id()
+
+        def step(idx: int, current_input: np.ndarray) -> None:
+            if idx >= len(cold_nodes):
+                self.tapReady.emit(job_id, current_input)
+                return
+            node = cold_nodes[idx]
+            chain_hash = pipeline.chain_hash_for(node.node_id, volume.version)
+
+            def on_ready(_section_job_id: int, arr: np.ndarray) -> None:
+                self._orch.sectionReady.disconnect(on_ready)
+                self._orch.failed.disconnect(on_failed)
+                self.intermediateReady.emit(job_id, node.node_id, arr)
+                step(idx + 1, arr)
+
+            def on_failed(_section_job_id: int, message: str) -> None:
+                self._orch.sectionReady.disconnect(on_ready)
+                self._orch.failed.disconnect(on_failed)
+                self.failed.emit(job_id, f"{node.spec.name}: {message}")
+
+            self._orch.sectionReady.connect(on_ready)
+            self._orch.failed.connect(on_failed)
+            self._orch.request(
+                node.spec, node.params, volume, axis, index,
+                input_section=current_input, chain_hash=chain_hash,
+            )
+
+        step(0, starting_input)
 
     def _read_raw(self, volume: SeismicVolume, axis: Axis, index: int) -> np.ndarray:
         if axis is Axis.INLINE:
