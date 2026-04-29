@@ -137,3 +137,37 @@ def test_set_tap_to_source_always_allowed(linear_spec):
     p = Pipeline()
     p.set_tap(SOURCE_ID)
     assert p.tap_node_id == SOURCE_ID
+
+
+def test_nodes_up_to_tap_empty_when_tap_is_source(linear_spec):
+    from eggseis.pipeline.model import Node, Pipeline
+
+    p = Pipeline()
+    p.append(Node(spec=linear_spec, params=linear_spec.param_model()))
+    assert p.nodes_up_to_tap() == []
+
+
+def test_nodes_up_to_tap_returns_inclusive_slice(linear_spec):
+    from eggseis.pipeline.model import Node, Pipeline
+
+    p = Pipeline()
+    a = Node(spec=linear_spec, params=linear_spec.param_model())
+    b = Node(spec=linear_spec, params=linear_spec.param_model())
+    c = Node(spec=linear_spec, params=linear_spec.param_model())
+    for n in (a, b, c):
+        p.append(n)
+    p.set_tap(b.node_id)
+    assert [n.node_id for n in p.nodes_up_to_tap()] == [a.node_id, b.node_id]
+
+
+def test_nodes_up_to_tap_filters_disabled(linear_spec):
+    from eggseis.pipeline.model import Node, Pipeline
+
+    p = Pipeline()
+    a = Node(spec=linear_spec, params=linear_spec.param_model())
+    b = Node(spec=linear_spec, params=linear_spec.param_model(), enabled=False)
+    c = Node(spec=linear_spec, params=linear_spec.param_model())
+    for n in (a, b, c):
+        p.append(n)
+    p.set_tap(c.node_id)
+    assert [n.node_id for n in p.nodes_up_to_tap()] == [a.node_id, c.node_id]

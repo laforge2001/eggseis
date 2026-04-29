@@ -71,3 +71,13 @@ class Pipeline:
                 self.tap_node_id = self.nodes[i].node_id
                 return
         self.tap_node_id = SOURCE_ID
+
+    def nodes_up_to_tap(self) -> list[Node]:
+        """Enabled nodes from index 0 through the tap, inclusive.
+
+        If the tap is SOURCE_ID, returns []. Disabled nodes are filtered.
+        """
+        if self.tap_node_id == SOURCE_ID:
+            return []
+        tap_idx = self._index(self.tap_node_id)
+        return [n for n in self.nodes[: tap_idx + 1] if n.enabled]
