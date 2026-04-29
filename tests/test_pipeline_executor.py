@@ -225,3 +225,21 @@ def test_non_deterministic_node_skips_cache_writes_downstream(qtbot, fake_backen
     assert len(orch.cache) == 1
 
     clear_registry()
+
+
+def test_timeslice_axis_short_circuits_to_raw(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline((linear_spec, linear_spec.param_model(scale=99.0)))
+    p.set_tap(p.nodes[0].node_id)
+
+    with qtbot.waitSignal(exe.tapReady, timeout=2000) as blocker:
+        exe.request_tap(p, volume, "timeslice", 0)
+    _job_id, arr = blocker.args
+    np.testing.assert_array_equal(arr, volume.read_timeslice(0))
