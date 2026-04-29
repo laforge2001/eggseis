@@ -7,11 +7,14 @@ walks Source → tap and the section viewer paints the tap's output.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel
 
+from eggseis.compute.cache import params_hash
 from eggseis.plugin import PluginSpec
 
 SOURCE_ID = "source"
@@ -85,3 +88,33 @@ class Pipeline:
             return []
         tap_idx = self._index(self.tap_node_id)
         return [n for n in self.nodes[: tap_idx + 1] if n.enabled]
+
+    def chain_hash_for(self, node_id: str, volume_version: tuple) -> str:
+        """Cache-key hash for the chain ending at `node_id`.
+
+        Source hash: blake2b of canonical-JSON volume_version tuple.
+        Each enabled node folds in (plugin_id, plugin_version, params_hash,
+        parent_hash). Disabled nodes act as identity (parent passes through).
+        """
+        source_blob = json.dumps(
+            list(volume_version), sort_keys=True, separators=(",", ":")
+        ).encode()
+        running = hashlib.blake2b(source_blob, digest_size=16).hexdigest()
+        if node_id == SOURCE_ID:
+            return running
+
+        tap_idx = self._index(node_id)
+        for node in self.nodes[: tap_idx + 1]:
+            if not node.enabled:
+                continue
+            payload = (
+                node.spec.id,
+                node.spec.version,
+                params_hash(node.params.model_dump()),
+                running,
+            )
+            blob = json.dumps(
+                list(payload), sort_keys=True, separators=(",", ":")
+            ).encode()
+            running = hashlib.blake2b(blob, digest_size=16).hexdigest()
+        return running
