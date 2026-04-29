@@ -153,3 +153,14 @@ def make_pipeline():
             p.append(Node(spec=spec, params=params))
         return p
     return _make
+
+
+@pytest.fixture
+def param_dock_factory():
+    """Factory that builds a ParamDock per Node, seeded from the node's params."""
+    def _factory(node):
+        from eggseis.widgets.param_dock import ParamDock
+        widget = ParamDock()
+        widget.set_plugin(node.spec, params=node.params)
+        return widget
+    return _factory

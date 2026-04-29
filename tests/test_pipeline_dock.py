@@ -181,17 +181,14 @@ def test_param_change_updates_pipeline_and_emits_changed(qtbot, linear_spec, mak
     assert p.nodes[0].params.scale == 9.0
 
 
-def test_param_widget_factory_renders_for_added_node(qtbot, linear_spec, make_pipeline):
+def test_param_widget_factory_renders_for_added_node(
+    qtbot, linear_spec, make_pipeline, param_dock_factory
+):
     """Wired factory must produce a non-None widget for each node."""
     from eggseis.pipeline.dock import PipelineDock
     from eggseis.widgets.param_dock import ParamDock
 
-    def factory(node):
-        w = ParamDock()
-        w.set_plugin(node.spec, params=node.params)
-        return w
-
-    dock = PipelineDock(param_widget_factory=factory)
+    dock = PipelineDock(param_widget_factory=param_dock_factory)
     qtbot.addWidget(dock)
     p = make_pipeline(linear_spec)
     dock.bind(p)
@@ -201,22 +198,15 @@ def test_param_widget_factory_renders_for_added_node(qtbot, linear_spec, make_pi
     assert isinstance(dock._param_widgets[nid], ParamDock)
 
 
-def test_param_widget_seeds_from_node_params(qtbot, linear_spec, make_pipeline):
+def test_param_widget_seeds_from_node_params(qtbot, linear_spec, make_pipeline, param_dock_factory):
     """ParamDock created via the factory should reflect current node params,
     not the spec defaults."""
     from eggseis.pipeline.dock import PipelineDock
-    from eggseis.widgets.param_dock import ParamDock
 
-    def factory(node):
-        w = ParamDock()
-        w.set_plugin(node.spec, params=node.params)
-        return w
-
-    dock = PipelineDock(param_widget_factory=factory)
+    dock = PipelineDock(param_widget_factory=param_dock_factory)
     qtbot.addWidget(dock)
     p = make_pipeline((linear_spec, linear_spec.param_model(scale=7.5)))
     dock.bind(p)
 
     widget = dock._param_widgets[p.nodes[0].node_id]
-    # ParamDock holds magicgui widget values keyed by param name.
-    assert widget._widgets["scale"].value == 7.5
+    assert widget.current_params().scale == 7.5

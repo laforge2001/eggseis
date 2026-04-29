@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
@@ -69,7 +69,7 @@ class ParamDock(QWidget):
     def current_spec(self) -> PluginSpec | None:
         return self._spec
 
-    def set_plugin(self, spec: PluginSpec | None, params=None) -> None:
+    def set_plugin(self, spec: PluginSpec | None, params: BaseModel | None = None) -> None:
         self._clear()
         self._spec = spec
         if spec is None:
@@ -77,16 +77,16 @@ class ParamDock(QWidget):
             return
         self._title.setText(spec.name)
         if not spec.params_decl:
-            # No params — emit a copy so caller can run.
-            self.paramsChanged.emit(params if params is not None else spec.param_model())
+            # No params — emit defaults for callers that didn't already
+            # have them (legacy single-attribute path). When the caller
+            # supplied params, they already know the values.
+            if params is None:
+                self.paramsChanged.emit(spec.param_model())
             return
 
-        from magicgui.widgets import Container, create_widget  # lazy import for headless safety
+        from magicgui.widgets import Container, create_widget
 
-        if params is not None:
-            initial = params.model_dump()
-        else:
-            initial = spec.param_model().model_dump()
+        initial = (params if params is not None else spec.param_model()).model_dump()
         widgets: dict[str, object] = {}
         children = []
         for name, p in spec.params_decl.items():
@@ -103,22 +103,30 @@ class ParamDock(QWidget):
         self._widgets = widgets
         self._gui = container
         self._layout.addWidget(container.native)
-        # Emit initial params so caller renders immediately.
-        self._emit()
+        # Initial emit only when the caller has no params yet. When the
+        # caller supplied params (e.g. PipelineDock factory), an emit here
+        # would round-trip the same values through pipeline.set_params and
+        # trigger a redundant compute request.
+        if params is None:
+            self._emit()
 
-    def _emit(self, *_args) -> None:
+    def current_params(self) -> BaseModel | None:
+        """Return the current params as a pydantic model, or None if no plugin set."""
         spec = self._spec
         if spec is None:
-            return
+            return None
         if not spec.params_decl:
-            self.paramsChanged.emit(spec.param_model())
-            return
+            return spec.param_model()
         values = {name: w.value for name, w in self._widgets.items()}
         try:
-            params = spec.param_model(**values)
+            return spec.param_model(**values)
         except ValidationError:
-            return
-        self.paramsChanged.emit(params)
+            return None
+
+    def _emit(self, *_args) -> None:
+        params = self.current_params()
+        if params is not None:
+            self.paramsChanged.emit(params)
 
     def _clear(self) -> None:
         if self._gui is not None:
