@@ -248,3 +248,42 @@ def test_timeslice_axis_short_circuits_to_raw(qtbot, fake_backend, linear_spec, 
         exe.request_tap(p, volume, "timeslice", 0)
     _job_id, arr = blocker.args
     np.testing.assert_array_equal(arr, volume.read_timeslice(0))
+
+
+def test_new_request_supersedes_in_flight(qtbot, fake_backend):
+    """Sleep-per-trace plugin so we can race two requests."""
+    import time
+
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="slow", version="0.1.0", deterministic=True, vectorized=False)
+    def slow(trace, scale: float = Param(default=1.0)):
+        time.sleep(0.005)  # 5 ms per trace
+        return trace * scale
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=slow._eggseis_spec, params=slow._eggseis_spec.param_model(scale=2.0)))
+    p.set_tap(p.nodes[0].node_id)
+
+    # Kick off the slow request. Don't wait.
+    exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    # Immediately supersede with a different param value.
+    p.set_params(p.nodes[0].node_id, slow._eggseis_spec.param_model(scale=4.0))
+    with qtbot.waitSignal(exe.tapReady, timeout=10_000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+
+    np.testing.assert_allclose(
+        arr, volume.read_inline(volume.geometry.inline_min) * 4.0, rtol=1e-5
+    )
+    clear_registry()

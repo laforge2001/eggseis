@@ -27,10 +27,30 @@ class PipelineExecutor(QObject):
         super().__init__()
         self._orch = orchestrator
         self._next_job_id = 0
+        self._active_job_id: int | None = None
+        self._active_on_ready = None
+        self._active_on_failed = None
 
     def _new_job_id(self) -> int:
         self._next_job_id += 1
         return self._next_job_id
+
+    def cancel_active(self) -> None:
+        """Drop pending chain steps + disconnect active slots + cancel orchestrator job."""
+        if self._active_on_ready is not None:
+            try:
+                self._orch.sectionReady.disconnect(self._active_on_ready)
+            except (TypeError, RuntimeError):
+                pass
+            self._active_on_ready = None
+        if self._active_on_failed is not None:
+            try:
+                self._orch.failed.disconnect(self._active_on_failed)
+            except (TypeError, RuntimeError):
+                pass
+            self._active_on_failed = None
+        self._orch.cancel_active()
+        self._active_job_id = None
 
     def request_tap(
         self,
@@ -39,6 +59,9 @@ class PipelineExecutor(QObject):
         axis: Axis | str,
         index: int,
     ) -> None:
+        # Cancel any in-flight chain before starting a new plan.
+        self.cancel_active()
+
         axis_enum = Axis(axis) if not isinstance(axis, Axis) else axis
 
         if axis_enum is Axis.TIMESLICE:
@@ -53,7 +76,6 @@ class PipelineExecutor(QObject):
             self.tapReady.emit(self._new_job_id(), raw)
             return
 
-        # Resolve cold suffix: walk from tap backward, find deepest cache hit.
         cache = self._orch.cache
         starting_input: np.ndarray | None = None
         cold_start_idx = 0
@@ -68,7 +90,6 @@ class PipelineExecutor(QObject):
                 cached = cache.get(key)
                 if cached is not None:
                     if i == len(plan) - 1:
-                        # Tap node itself is cached.
                         self.tapReady.emit(self._new_job_id(), cached)
                         return
                     starting_input = cached
@@ -77,7 +98,7 @@ class PipelineExecutor(QObject):
 
         if starting_input is None:
             starting_input = self._read_raw(volume, axis_enum, index)
-            # cold_start_idx remains 0 (initialized before the cache walk)
+            # cold_start_idx stays 0 from initialization
 
         cold_nodes = plan[cold_start_idx:]
         self._run_chain(pipeline, volume, axis_enum, index, cold_nodes, starting_input)
@@ -93,28 +114,47 @@ class PipelineExecutor(QObject):
     ) -> None:
         """Execute cold_nodes serially. Each node's output feeds the next."""
         job_id = self._new_job_id()
+        self._active_job_id = job_id
 
         def step(idx: int, current_input: np.ndarray) -> None:
+            if self._active_job_id != job_id:
+                return
             if idx >= len(cold_nodes):
                 self.tapReady.emit(job_id, current_input)
+                self._active_job_id = None
                 return
             node = cold_nodes[idx]
             chain_hash = pipeline.chain_hash_for(node.node_id, volume.version)
             chain_det = pipeline.deterministic_through(node.node_id)
 
-            # The orchestrator's job_id is intentionally unused here;
-            # supersede / cancellation guard is added in Task 20.
             def on_ready(_section_job_id: int, arr: np.ndarray) -> None:
-                self._orch.sectionReady.disconnect(on_ready)
-                self._orch.failed.disconnect(on_failed)
+                if self._active_job_id != job_id:
+                    return
+                try:
+                    self._orch.sectionReady.disconnect(on_ready)
+                    self._orch.failed.disconnect(on_failed)
+                except (TypeError, RuntimeError):
+                    pass
+                self._active_on_ready = None
+                self._active_on_failed = None
                 self.intermediateReady.emit(job_id, node.node_id, arr)
                 step(idx + 1, arr)
 
             def on_failed(_section_job_id: int, message: str) -> None:
-                self._orch.sectionReady.disconnect(on_ready)
-                self._orch.failed.disconnect(on_failed)
+                if self._active_job_id != job_id:
+                    return
+                try:
+                    self._orch.sectionReady.disconnect(on_ready)
+                    self._orch.failed.disconnect(on_failed)
+                except (TypeError, RuntimeError):
+                    pass
+                self._active_on_ready = None
+                self._active_on_failed = None
+                self._active_job_id = None
                 self.failed.emit(job_id, f"{node.spec.name}: {message}")
 
+            self._active_on_ready = on_ready
+            self._active_on_failed = on_failed
             self._orch.sectionReady.connect(on_ready)
             self._orch.failed.connect(on_failed)
             self._orch.request(
