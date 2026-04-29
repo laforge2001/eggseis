@@ -76,6 +76,9 @@ class JobOrchestrator(QObject):
         volume: SeismicVolume,
         axis: Axis | str,
         index: int,
+        *,
+        input_section: np.ndarray | None = None,
+        chain_hash: str | None = None,
     ) -> None:
         axis_enum = Axis(axis)
         self._pending = {
@@ -84,16 +87,15 @@ class JobOrchestrator(QObject):
             "volume": volume,
             "axis": axis_enum,
             "index": index,
+            "input_section": input_section,
+            "chain_hash": chain_hash,
         }
-        # Cache-hit fast path: skip debounce.
-        key = make_cache_key(spec, params, volume, axis_enum, index)
+        key = make_cache_key(spec, params, volume, axis_enum, index, chain_hash=chain_hash)
         self._pending["key"] = key
         if spec.deterministic:
             cached = self._cache.get(key)
             if cached is not None:
                 self._pending = None
-                # Cancel any in-flight job; a late tilesReady/sectionReady
-                # from it would clobber this synchronous paint.
                 self.cancel_active()
                 self.sectionReady.emit(Job().id, cached)
                 return
@@ -119,13 +121,15 @@ class JobOrchestrator(QObject):
         index: int = req["index"]
 
         if axis is Axis.TIMESLICE:
-            # Trace-local attributes don't apply; surface raw and stop.
             self.sectionReady.emit(Job().id, volume.read_timeslice(index))
             return
 
-        section = (
-            volume.read_inline(index) if axis is Axis.INLINE else volume.read_xline(index)
-        )
+        if req.get("input_section") is not None:
+            section = req["input_section"]
+        else:
+            section = (
+                volume.read_inline(index) if axis is Axis.INLINE else volume.read_xline(index)
+            )
 
         if self._active is not None:
             self._active.token.cancel()
