@@ -335,12 +335,10 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"{name} failed: {message}", 5000)
 
-    def _make_param_widget(self, _node):
-        # M5: per-node ParamDock integration with magicgui across multiple
-        # node instances is a known polish item. The dock falls back to its
-        # empty panel — node params use the model's defaults until M6 wires
-        # the per-node editor.
-        return None
+    def _make_param_widget(self, node):
+        widget = ParamDock()
+        widget.set_plugin(node.spec, params=node.params)
+        return widget
 
     def _on_add_plugin_clicked(self) -> None:
         specs = sorted(discover_all(), key=lambda s: s.name)

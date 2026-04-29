@@ -69,7 +69,7 @@ class ParamDock(QWidget):
     def current_spec(self) -> PluginSpec | None:
         return self._spec
 
-    def set_plugin(self, spec: PluginSpec | None) -> None:
+    def set_plugin(self, spec: PluginSpec | None, params=None) -> None:
         self._clear()
         self._spec = spec
         if spec is None:
@@ -77,19 +77,22 @@ class ParamDock(QWidget):
             return
         self._title.setText(spec.name)
         if not spec.params_decl:
-            # No params — emit defaults once so caller can run.
-            self.paramsChanged.emit(spec.param_model())
+            # No params — emit a copy so caller can run.
+            self.paramsChanged.emit(params if params is not None else spec.param_model())
             return
 
         from magicgui.widgets import Container, create_widget  # lazy import for headless safety
 
-        defaults = spec.param_model().model_dump()
+        if params is not None:
+            initial = params.model_dump()
+        else:
+            initial = spec.param_model().model_dump()
         widgets: dict[str, object] = {}
         children = []
         for name, p in spec.params_decl.items():
             opts = _widget_options_for(p)
             wt = _widget_type_for(p)
-            kwargs = {"value": defaults[name], "name": name, "options": opts}
+            kwargs = {"value": initial[name], "name": name, "options": opts}
             if wt is not None:
                 kwargs["widget_type"] = wt
             w = create_widget(**kwargs)

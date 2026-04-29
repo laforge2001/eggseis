@@ -10,7 +10,8 @@ def test_source_row_appears_first_after_bind(qtbot, linear_spec, make_pipeline):
     qtbot.addWidget(dock)
     dock.bind(make_pipeline())  # empty pipeline
     assert dock.list_widget.count() == 1
-    assert "source" in dock.list_widget.item(0).text().lower()
+    assert dock._source_row is not None
+    assert "source" in dock._source_row.label.text().lower()
 
 
 def test_bind_renders_user_added_nodes(qtbot, linear_spec, make_pipeline):
@@ -178,3 +179,44 @@ def test_param_change_updates_pipeline_and_emits_changed(qtbot, linear_spec, mak
         target_widget.paramsChanged.emit(new_params)
 
     assert p.nodes[0].params.scale == 9.0
+
+
+def test_param_widget_factory_renders_for_added_node(qtbot, linear_spec, make_pipeline):
+    """Wired factory must produce a non-None widget for each node."""
+    from eggseis.pipeline.dock import PipelineDock
+    from eggseis.widgets.param_dock import ParamDock
+
+    def factory(node):
+        w = ParamDock()
+        w.set_plugin(node.spec, params=node.params)
+        return w
+
+    dock = PipelineDock(param_widget_factory=factory)
+    qtbot.addWidget(dock)
+    p = make_pipeline(linear_spec)
+    dock.bind(p)
+
+    nid = p.nodes[0].node_id
+    assert nid in dock._param_widgets
+    assert isinstance(dock._param_widgets[nid], ParamDock)
+
+
+def test_param_widget_seeds_from_node_params(qtbot, linear_spec, make_pipeline):
+    """ParamDock created via the factory should reflect current node params,
+    not the spec defaults."""
+    from eggseis.pipeline.dock import PipelineDock
+    from eggseis.widgets.param_dock import ParamDock
+
+    def factory(node):
+        w = ParamDock()
+        w.set_plugin(node.spec, params=node.params)
+        return w
+
+    dock = PipelineDock(param_widget_factory=factory)
+    qtbot.addWidget(dock)
+    p = make_pipeline((linear_spec, linear_spec.param_model(scale=7.5)))
+    dock.bind(p)
+
+    widget = dock._param_widgets[p.nodes[0].node_id]
+    # ParamDock holds magicgui widget values keyed by param name.
+    assert widget._widgets["scale"].value == 7.5

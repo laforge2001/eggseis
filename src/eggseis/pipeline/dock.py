@@ -133,7 +133,7 @@ class PipelineDock(QDockWidget):
             return
 
         # Source row.
-        src_item = QListWidgetItem("Source (raw amplitude)", self.list_widget)
+        src_item = QListWidgetItem(self.list_widget)
         src_item.setData(Qt.UserRole, SOURCE_ID)
         src_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self._source_row = _SourceRow()
@@ -161,7 +161,7 @@ class PipelineDock(QDockWidget):
         self._sync_tap_radio_from_pipeline()
 
     def _append_node_row(self, node: Node) -> None:
-        item = QListWidgetItem(node.spec.name, self.list_widget)
+        item = QListWidgetItem(self.list_widget)
         item.setData(Qt.UserRole, node.node_id)
         flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsDragEnabled
         item.setFlags(flags)
