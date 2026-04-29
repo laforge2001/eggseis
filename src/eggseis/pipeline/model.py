@@ -45,6 +45,10 @@ class Pipeline:
             self.tap_node_id = SOURCE_ID
 
     def move(self, node_id: str, new_index: int) -> None:
+        """Reposition a node to `new_index`.
+
+        Out-of-bounds indices follow ``list.insert`` semantics (clamped/appended).
+        """
         i = self._index(node_id)
         node = self.nodes.pop(i)
         self.nodes.insert(new_index, node)
@@ -61,12 +65,12 @@ class Pipeline:
         if node_id == SOURCE_ID:
             self.tap_node_id = SOURCE_ID
             return
-        target = self.nodes[self._index(node_id)]
+        idx = self._index(node_id)
+        target = self.nodes[idx]
         if target.enabled:
             self.tap_node_id = node_id
             return
-        target_idx = self._index(node_id)
-        for i in range(target_idx - 1, -1, -1):
+        for i in range(idx - 1, -1, -1):
             if self.nodes[i].enabled:
                 self.tap_node_id = self.nodes[i].node_id
                 return
