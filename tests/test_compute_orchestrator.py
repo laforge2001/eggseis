@@ -71,7 +71,7 @@ def test_tile_runnable_skips_when_token_already_cancelled(qtbot, envelope_spec_a
 
 def test_orchestrator_returns_from_cache_when_present(qtbot, fake_backend):
     from eggseis.builtins.envelope import envelope
-    from eggseis.compute.cache import CacheKey, SectionLRU, params_hash
+    from eggseis.compute.cache import SectionLRU, make_cache_key
     from eggseis.compute.orchestrator import JobOrchestrator
     from eggseis.data import SeismicVolume
 
@@ -83,14 +83,7 @@ def test_orchestrator_returns_from_cache_when_present(qtbot, fake_backend):
         (vol.geometry.n_xlines, vol.geometry.n_samples), 7.0, dtype=np.float32
     )
     cache.put(
-        CacheKey(
-            plugin_id=spec.id,
-            plugin_version=spec.version,
-            params_hash=params_hash(params.model_dump()),
-            axis="inline",
-            index=vol.geometry.inline_min,
-            volume_version=vol.version,
-        ),
+        make_cache_key(spec, params, vol, "inline", vol.geometry.inline_min),
         pre,
     )
 
@@ -142,21 +135,26 @@ def test_orchestrator_caches_after_compute(qtbot, fake_backend):
     assert (time.perf_counter() - t0) * 1000 < 200
 
 
-@pytest.fixture
-def slow_spec():
-    """Per-trace sleep — long enough that delivery timer fires mid-job."""
+def _make_sleep_spec(name: str, sleep_s: float):
+    """Build a one-off `gain` plugin that sleeps `sleep_s` per trace."""
     import time as _time
 
-    from eggseis.plugin import Param, clear_registry, trace_attribute
+    from eggseis.plugin import Param, trace_attribute
 
-    clear_registry()
-
-    @trace_attribute(name="Slow", version="0.1.0")
-    def slow(trace, gain: float = Param(1.0, min=0.0, max=10.0)):
-        _time.sleep(0.005)
+    @trace_attribute(name=name, version="0.1.0")
+    def sleeper(trace, gain: float = Param(1.0, min=0.0, max=10.0)):
+        _time.sleep(sleep_s)
         return (trace * gain).astype(np.float32)
 
-    yield slow._eggseis_spec
+    return sleeper._eggseis_spec
+
+
+@pytest.fixture
+def slow_spec():
+    """5 ms per trace — long enough that delivery timer fires mid-job."""
+    from eggseis.plugin import clear_registry
+    clear_registry()
+    yield _make_sleep_spec("Slow", 0.005)
     clear_registry()
 
 
@@ -195,7 +193,8 @@ def test_debounce_coalesces_rapid_requests(qtbot, fake_backend):
         orch.request(spec, spec.param_model(), vol, "inline",
                      vol.geometry.inline_min + (i % vol.geometry.n_inlines))
 
-    qtbot.wait(2000)
+    # Wait for the (single) post-debounce job to drain instead of sleeping.
+    qtbot.waitUntil(lambda: orch._active is None and bool(sections), timeout=5000)
     assert len(sections) <= vol.geometry.n_inlines
     assert len(orch.cache) <= vol.geometry.n_inlines
 
@@ -203,18 +202,9 @@ def test_debounce_coalesces_rapid_requests(qtbot, fake_backend):
 @pytest.fixture
 def very_slow_spec():
     """50 ms per trace — first job stays in flight long enough to be superseded."""
-    import time as _time
-
-    from eggseis.plugin import Param, clear_registry, trace_attribute
-
+    from eggseis.plugin import clear_registry
     clear_registry()
-
-    @trace_attribute(name="VerySlow", version="0.1.0")
-    def very_slow(trace, gain: float = Param(1.0, min=0.0, max=10.0)):
-        _time.sleep(0.05)
-        return (trace * gain).astype(np.float32)
-
-    yield very_slow._eggseis_spec
+    yield _make_sleep_spec("VerySlow", 0.05)
     clear_registry()
 
 
@@ -299,18 +289,14 @@ def test_cache_hit_cancels_in_flight_job(qtbot, fake_backend, very_slow_spec):
     orch = JobOrchestrator()
 
     # Prime cache with a fake result for inline_min + 1.
-    from eggseis.compute.cache import CacheKey, params_hash
+    from eggseis.compute.cache import make_cache_key
     pre = np.full(
         (vol.geometry.n_xlines, vol.geometry.n_samples), 9.0, dtype=np.float32
     )
     orch.cache.put(
-        CacheKey(
-            plugin_id=very_slow_spec.id,
-            plugin_version=very_slow_spec.version,
-            params_hash=params_hash(very_slow_spec.param_model().model_dump()),
-            axis="inline",
-            index=vol.geometry.inline_min + 1,
-            volume_version=vol.version,
+        make_cache_key(
+            very_slow_spec, very_slow_spec.param_model(), vol,
+            "inline", vol.geometry.inline_min + 1,
         ),
         pre,
     )

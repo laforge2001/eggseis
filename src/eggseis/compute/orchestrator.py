@@ -9,12 +9,13 @@ from pydantic import BaseModel
 from PySide6.QtCore import QObject, QThreadPool, QTimer, Signal
 
 from eggseis.axes import Axis
-from eggseis.compute.cache import CacheKey, SectionLRU, params_hash
+from eggseis.compute.cache import SectionLRU, make_cache_key
 from eggseis.compute.job import Job
 from eggseis.compute.tile import split_section
 from eggseis.compute.worker import TileRunnable, TileSignals
 from eggseis.data import SeismicVolume
 from eggseis.plugin import PluginSpec
+from eggseis.plugin_runner import make_trace_context
 
 DEBOUNCE_MS = 150
 DELIVERY_MS = 50
@@ -76,15 +77,17 @@ class JobOrchestrator(QObject):
         axis: Axis | str,
         index: int,
     ) -> None:
+        axis_enum = Axis(axis)
         self._pending = {
             "spec": spec,
             "params": params,
             "volume": volume,
-            "axis": Axis(axis),
+            "axis": axis_enum,
             "index": index,
         }
         # Cache-hit fast path: skip debounce.
-        key = self._make_key(spec, params, volume, Axis(axis), index)
+        key = make_cache_key(spec, params, volume, axis_enum, index)
+        self._pending["key"] = key
         if spec.deterministic:
             cached = self._cache.get(key)
             if cached is not None:
@@ -102,23 +105,7 @@ class JobOrchestrator(QObject):
         self._active = None
         self._delivery.stop()
         self._delivered_ranges.clear()
-
-    def _make_key(
-        self,
-        spec: PluginSpec,
-        params: BaseModel,
-        volume: SeismicVolume,
-        axis: Axis,
-        index: int,
-    ) -> CacheKey:
-        return CacheKey(
-            plugin_id=spec.id,
-            plugin_version=spec.version,
-            params_hash=params_hash(params.model_dump()),
-            axis=axis.value,
-            index=index,
-            volume_version=volume.version,
-        )
+        self._tiles_remaining = 0
 
     def _dispatch_pending(self) -> None:
         if self._pending is None:
@@ -151,11 +138,8 @@ class JobOrchestrator(QObject):
             index=index,
             section=section,
             output=np.empty_like(section, dtype=np.float32),
-            context={
-                "sample_rate_ms": volume.geometry.sample_rate_ms,
-                "axis": axis.value,
-                "index": index,
-            },
+            context=make_trace_context(volume, axis, index),
+            cache_key=req.get("key"),
         )
         self._active = job
         tiles = split_section(section.shape[0], TILE_SIZE)
@@ -180,10 +164,7 @@ class JobOrchestrator(QObject):
             self.tilesReady.emit(job.id, job.output, list(self._delivered_ranges))
             self._delivered_ranges.clear()
         if job.spec.deterministic:
-            self._cache.put(
-                self._make_key(job.spec, job.params, job.volume, job.axis, job.index),
-                job.output,
-            )
+            self._cache.put(job.cache_key, job.output)
         self.sectionReady.emit(job.id, job.output)
         self._active = None
 
@@ -194,6 +175,7 @@ class JobOrchestrator(QObject):
         self._active = None
         self._delivery.stop()
         self._delivered_ranges.clear()
+        self._tiles_remaining = 0
         self.failed.emit(job_id, message)
 
     def _flush_delivery(self) -> None:

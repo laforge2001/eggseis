@@ -178,35 +178,37 @@ class MainWindow(QMainWindow):
         except (FileNotFoundError, ValueError) as exc:
             QMessageBox.critical(self, "Open Project failed", str(exc))
 
-    def _on_show_plugin_errors(self) -> None:
-        if not self._plugin_load_errors:
-            QMessageBox.information(
-                self, "Plugin Errors", "No plugin load errors recorded."
-            )
+    def _show_errors_dialog(
+        self, title: str, summary: str, empty_message: str, body_lines: list[str]
+    ) -> None:
+        if not body_lines:
+            QMessageBox.information(self, title, empty_message)
             return
-        body = "\n\n".join(
-            f"• {err.source}\n    {err.message}" for err in self._plugin_load_errors
-        )
         box = QMessageBox(self)
-        box.setWindowTitle("Plugin Errors")
+        box.setWindowTitle(title)
         box.setIcon(QMessageBox.Warning)
-        box.setText(f"{len(self._plugin_load_errors)} plugin(s) failed to load:")
-        box.setDetailedText(body)
+        box.setText(summary)
+        box.setDetailedText("\n\n".join(body_lines))
         box.exec()
 
+    def _on_show_plugin_errors(self) -> None:
+        self._show_errors_dialog(
+            title="Plugin Errors",
+            summary=f"{len(self._plugin_load_errors)} plugin(s) failed to load:",
+            empty_message="No plugin load errors recorded.",
+            body_lines=[
+                f"• {err.source}\n    {err.message}"
+                for err in self._plugin_load_errors
+            ],
+        )
+
     def _on_show_compute_errors(self) -> None:
-        if not self._compute_errors:
-            QMessageBox.information(
-                self, "Compute Errors", "No compute errors recorded this session."
-            )
-            return
-        body = "\n\n".join(f"• {name}\n    {msg}" for name, msg in self._compute_errors)
-        box = QMessageBox(self)
-        box.setWindowTitle("Compute Errors")
-        box.setIcon(QMessageBox.Warning)
-        box.setText(f"{len(self._compute_errors)} compute error(s) this session:")
-        box.setDetailedText(body)
-        box.exec()
+        self._show_errors_dialog(
+            title="Compute Errors",
+            summary=f"{len(self._compute_errors)} compute error(s) this session:",
+            empty_message="No compute errors recorded this session.",
+            body_lines=[f"• {name}\n    {msg}" for name, msg in self._compute_errors],
+        )
 
     def _on_new_plugin(self) -> None:
         name, ok = QInputDialog.getText(
@@ -267,14 +269,18 @@ class MainWindow(QMainWindow):
 
     def _recompute_overlay(self, params=None) -> None:
         spec = self._active_plugin
-        if spec is None or not self.section_viewer.has_volume:
+        volume = self.section_viewer.volume
+        if spec is None or volume is None:
             return
         if params is None:
-            params = self._active_params or spec.param_model()
+            params = (
+                self._active_params if self._active_params is not None
+                else spec.param_model()
+            )
         self._compute.request(
             spec,
             params,
-            self.section_viewer._volume,
+            volume,
             self.section_viewer.current_axis,
             self.section_viewer.current_index,
         )
@@ -289,4 +295,7 @@ class MainWindow(QMainWindow):
         spec = self._active_plugin
         name = spec.name if spec else "compute"
         self._compute_errors.append((name, message))
+        self._compute_errors_action.setText(
+            f"&Compute Errors… ({len(self._compute_errors)})"
+        )
         self.statusBar().showMessage(f"{name} failed: {message}", 5000)

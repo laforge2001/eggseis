@@ -34,6 +34,24 @@ class CacheKey:
     volume_version: tuple
 
 
+def make_cache_key(spec, params, volume, axis, index) -> CacheKey:
+    """Build a `CacheKey` for a `(spec, params, volume, axis, index)` tuple.
+
+    Single source of truth shared by `JobOrchestrator` and tests so the
+    canonical layout never drifts. `axis` may be an `Axis` enum or its
+    `.value` string.
+    """
+    axis_value = axis.value if hasattr(axis, "value") else axis
+    return CacheKey(
+        plugin_id=spec.id,
+        plugin_version=spec.version,
+        params_hash=params_hash(params.model_dump()),
+        axis=axis_value,
+        index=index,
+        volume_version=volume.version,
+    )
+
+
 class SectionLRU:
     """OrderedDict-backed LRU keyed on `CacheKey`, byte-budgeted."""
 

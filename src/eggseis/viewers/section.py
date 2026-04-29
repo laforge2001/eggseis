@@ -69,6 +69,10 @@ class SectionViewer(QWidget):
         return self._volume is not None
 
     @property
+    def volume(self) -> SeismicVolume | None:
+        return self._volume
+
+    @property
     def has_overlay(self) -> bool:
         return self._overlay is not None
 
@@ -145,10 +149,13 @@ class SectionViewer(QWidget):
         # Timeslice: already (n_inlines, n_xlines).
         arr = source.T if self._axis in (Axis.INLINE, Axis.XLINE) else source
 
-        if showing_overlay and self._levels_locked and self._baseline_levels is not None:
-            levels = self._baseline_levels
-        elif showing_overlay and self._partial_overlay and self._baseline_levels is not None:
-            # Don't recompute levels mid-paint; reuse what we have.
+        # Reuse baseline levels when locked, OR when painting an in-progress
+        # tile (partial=True) so the colour scale stays stable across the run.
+        if (
+            showing_overlay
+            and self._baseline_levels is not None
+            and (self._levels_locked or self._partial_overlay)
+        ):
             levels = self._baseline_levels
         else:
             levels = self._compute_levels(arr)

@@ -12,6 +12,21 @@ from eggseis.data import SeismicVolume
 from eggseis.plugin import PluginSpec
 
 
+def make_trace_context(
+    volume: SeismicVolume, axis: Axis | str, index: int
+) -> dict[str, Any]:
+    """Build the per-section `context` dict passed to plugins that opt in.
+
+    Single source of truth so production sites and tests can stay aligned.
+    """
+    axis = Axis(axis)
+    return {
+        "sample_rate_ms": volume.geometry.sample_rate_ms,
+        "axis": axis.value,
+        "index": index,
+    }
+
+
 def compute_tile(
     spec: PluginSpec,
     params_dump: dict[str, Any],
@@ -27,18 +42,16 @@ def compute_tile(
     Used directly by tile workers and indirectly (whole-section call) by
     the synchronous `run_on_section` below.
     """
+    kwargs = dict(params_dump)
+    if spec.accepts_context:
+        kwargs["context"] = context
+
     if spec.vectorized:
-        kwargs = dict(params_dump)
-        if spec.accepts_context:
-            kwargs["context"] = context
         result = spec.func(traces=section[start:stop], **kwargs).astype(np.float32)
         out[start:stop] = result
         return
 
     for i in range(start, stop):
-        kwargs = dict(params_dump)
-        if spec.accepts_context:
-            kwargs["context"] = context
         out[i] = spec.func(section[i], **kwargs)
 
 
@@ -64,18 +77,12 @@ def run_on_section(
     else:
         return volume.read_timeslice(index)
 
-    g = volume.geometry
-    context = {
-        "sample_rate_ms": g.sample_rate_ms,
-        "axis": axis.value,
-        "index": index,
-    }
     out = np.empty_like(section, dtype=np.float32)
     compute_tile(
         spec,
         params.model_dump(),
         section,
-        context,
+        make_trace_context(volume, axis, index),
         start=0,
         stop=section.shape[0],
         out=out,
