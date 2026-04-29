@@ -190,3 +190,38 @@ def test_plugin_failure_halts_plan_and_emits_failed(qtbot, fake_backend):
     assert "boom" in message  # plugin name appears in surfaced error
 
     clear_registry()
+
+
+def test_non_deterministic_node_skips_cache_writes_downstream(qtbot, fake_backend):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
+    def lin(traces, scale: float = Param(default=1.0)):
+        return traces * scale
+
+    @trace_attribute(name="rng", version="0.1.0", deterministic=False, vectorized=True)
+    def rng(traces, amp: float = Param(default=1.0)):
+        return traces
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model(scale=2.0)))
+    p.append(Node(spec=rng._eggseis_spec, params=rng._eggseis_spec.param_model()))
+    p.append(Node(spec=lin._eggseis_spec, params=lin._eggseis_spec.param_model(scale=3.0)))
+    p.set_tap(p.nodes[-1].node_id)
+
+    with qtbot.waitSignal(exe.tapReady, timeout=5000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    # Cache holds only the deterministic prefix (node 1).
+    assert len(orch.cache) == 1
+
+    clear_registry()

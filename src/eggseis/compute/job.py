@@ -46,3 +46,4 @@ class Job:
     context: dict[str, Any] = field(default_factory=dict)
     token: CancellationToken = field(default_factory=CancellationToken)
     cache_key: Any = None  # CacheKey, set at dispatch; reused on finalize.
+    skip_cache_write: bool = False  # True for nodes downstream of non-deterministic chain.

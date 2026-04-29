@@ -40,6 +40,11 @@ class PipelineExecutor(QObject):
         index: int,
     ) -> None:
         axis_enum = Axis(axis) if not isinstance(axis, Axis) else axis
+
+        if axis_enum is Axis.TIMESLICE:
+            self.tapReady.emit(self._new_job_id(), volume.read_timeslice(index))
+            return
+
         plan = pipeline.nodes_up_to_tap()
 
         # Source / empty plan: raw paint.
@@ -95,6 +100,7 @@ class PipelineExecutor(QObject):
                 return
             node = cold_nodes[idx]
             chain_hash = pipeline.chain_hash_for(node.node_id, volume.version)
+            chain_det = pipeline.deterministic_through(node.node_id)
 
             # The orchestrator's job_id is intentionally unused here;
             # supersede / cancellation guard is added in Task 20.
@@ -114,6 +120,7 @@ class PipelineExecutor(QObject):
             self._orch.request(
                 node.spec, node.params, volume, axis, index,
                 input_section=current_input, chain_hash=chain_hash,
+                skip_cache_write=not chain_det,
             )
 
         step(0, starting_input)

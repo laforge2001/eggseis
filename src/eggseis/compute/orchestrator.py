@@ -79,6 +79,7 @@ class JobOrchestrator(QObject):
         *,
         input_section: np.ndarray | None = None,
         chain_hash: str | None = None,
+        skip_cache_write: bool = False,
     ) -> None:
         axis_enum = Axis(axis)
         self._pending = {
@@ -89,6 +90,7 @@ class JobOrchestrator(QObject):
             "index": index,
             "input_section": None if input_section is None else input_section.copy(),
             "chain_hash": chain_hash,
+            "skip_cache_write": skip_cache_write,
         }
         key = make_cache_key(spec, params, volume, axis_enum, index, chain_hash=chain_hash)
         self._pending["key"] = key
@@ -149,6 +151,7 @@ class JobOrchestrator(QObject):
             output=np.empty_like(section, dtype=np.float32),
             context=make_trace_context(volume, axis, index),
             cache_key=req.get("key"),
+            skip_cache_write=req.get("skip_cache_write", False),
         )
         self._active = job
         tiles = split_section(section.shape[0], TILE_SIZE)
@@ -172,7 +175,7 @@ class JobOrchestrator(QObject):
         if self._delivered_ranges:
             self.tilesReady.emit(job.id, job.output, list(self._delivered_ranges))
             self._delivered_ranges.clear()
-        if job.spec.deterministic:
+        if job.spec.deterministic and not job.skip_cache_write:
             self._cache.put(job.cache_key, job.output)
         self.sectionReady.emit(job.id, job.output)
         self._active = None
