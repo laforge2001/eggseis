@@ -94,3 +94,40 @@ def test_warm_tap_returns_cached_output(qtbot, fake_backend, linear_spec, make_p
     _job_id, arr = blocker.args
     expected = volume.read_inline(volume.geometry.inline_min) * 6.0
     np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+
+def test_param_edit_on_middle_node_invalidates_only_downstream(
+    qtbot, fake_backend, linear_spec, make_pipeline
+):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(
+        (linear_spec, linear_spec.param_model(scale=2.0)),
+        (linear_spec, linear_spec.param_model(scale=3.0)),
+        (linear_spec, linear_spec.param_model(scale=5.0)),
+    )
+    p.set_tap(p.nodes[-1].node_id)
+
+    # Warm whole chain.
+    with qtbot.waitSignal(exe.tapReady, timeout=5000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    cache_size_after_warm = len(orch.cache)
+    assert cache_size_after_warm == 3  # 3 entries: node 1, 2, 3
+
+    # Edit middle node param.
+    p.set_params(p.nodes[1].node_id, linear_spec.param_model(scale=7.0))
+
+    with qtbot.waitSignal(exe.tapReady, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    expected = volume.read_inline(volume.geometry.inline_min) * 2.0 * 7.0 * 5.0
+    np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+    # Cache now has 5 entries: node 1 (unchanged), old node 2/3, new node 2/3.
+    assert len(orch.cache) == 5
