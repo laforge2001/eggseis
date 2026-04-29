@@ -24,7 +24,7 @@ def _key(i: int) -> CacheKey:
     return CacheKey(
         plugin_id="p",
         plugin_version="0.1.0",
-        params_hash="h",
+        chain_hash="h",
         axis="inline",
         index=i,
         volume_version=("mdio", "/x", 1, 1),

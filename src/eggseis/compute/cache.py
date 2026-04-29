@@ -28,7 +28,7 @@ def params_hash(params_dump: dict[str, Any]) -> str:
 class CacheKey:
     plugin_id: str
     plugin_version: str
-    params_hash: str
+    chain_hash: str
     axis: str
     index: int
     volume_version: tuple
@@ -45,7 +45,7 @@ def make_cache_key(spec, params, volume, axis, index) -> CacheKey:
     return CacheKey(
         plugin_id=spec.id,
         plugin_version=spec.version,
-        params_hash=params_hash(params.model_dump()),
+        chain_hash=params_hash(params.model_dump()),
         axis=axis_value,
         index=index,
         volume_version=volume.version,
