@@ -66,3 +66,31 @@ def test_three_node_chain_executes_serially(qtbot, fake_backend, linear_spec, ma
     _job_id, arr = blocker.args
     expected = volume.read_inline(volume.geometry.inline_min) * 30.0
     np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+
+def test_warm_tap_returns_cached_output(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(
+        (linear_spec, linear_spec.param_model(scale=2.0)),
+        (linear_spec, linear_spec.param_model(scale=3.0)),
+    )
+    p.set_tap(p.nodes[-1].node_id)
+
+    # Warm.
+    with qtbot.waitSignal(exe.tapReady, timeout=5000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    # Second request: should hit cache. Tight timeout — generous for CI but
+    # tight enough that a re-compute would miss it.
+    with qtbot.waitSignal(exe.tapReady, timeout=200) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    expected = volume.read_inline(volume.geometry.inline_min) * 6.0
+    np.testing.assert_allclose(arr, expected, rtol=1e-5)
