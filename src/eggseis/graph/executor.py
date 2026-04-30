@@ -15,7 +15,7 @@ from eggseis.axes import Axis
 from eggseis.compute.cache import make_cache_key
 from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
-from eggseis.graph.model import SOURCE_ID, Graph
+from eggseis.graph.model import SOURCE_ID, Graph, read_source_at
 
 
 class GraphExecutor(QObject):
@@ -107,13 +107,7 @@ class GraphExecutor(QObject):
         return self._next_job_id
 
     def _read_source_at(self, volume: SeismicVolume, port: str, index: int) -> np.ndarray:
-        if port == "inline":
-            return volume.read_inline(index)
-        if port == "xline":
-            return volume.read_xline(index)
-        if port == "timeslice":
-            return volume.read_timeslice(index)
-        raise ValueError(f"unknown source port {port!r}")
+        return read_source_at(volume, port, index)
 
     def _validate_cone(self, graph: Graph, cone: list[str]) -> None:
         """Reject the plan early if any node in the cone has dangling input ports.

@@ -29,6 +29,17 @@ SOURCE_ID = "source"
 SOURCE_PORTS: tuple[str, ...] = ("inline", "xline", "timeslice")
 
 
+def read_source_at(volume, port: str, index: int):
+    """Read the implicit Source node's output for the given port."""
+    if port == "inline":
+        return volume.read_inline(index)
+    if port == "xline":
+        return volume.read_xline(index)
+    if port == "timeslice":
+        return volume.read_timeslice(index)
+    raise ValueError(f"unknown source port {port!r}")
+
+
 class CycleError(ValueError):
     """Raised when adding an edge would introduce a cycle."""
 

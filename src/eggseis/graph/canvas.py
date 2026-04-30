@@ -124,8 +124,10 @@ class GraphCanvas(QWidget):
         self._view = qne.FlowView(self._scene)
         self._scene_nodes: dict[str, qne.Node] = {}  # graph node_id -> scene node
         self._source_scene_node: qne.Node | None = None
-        self._registered_specs: dict[str, type[NodeDataModel]] = {}
-        self._spec_by_class: dict[str, PluginSpec] = {}
+        # Maps spec.id -> (model_class, spec). Generated NodeDataModel
+        # subclasses are reverse-keyed by class name to translate
+        # lib-side node_created back into our model.
+        self._registered: dict[str, tuple[type[NodeDataModel], PluginSpec]] = {}
         self._suppress_signal_sync = False
 
         layout = QVBoxLayout(self)
@@ -160,13 +162,19 @@ class GraphCanvas(QWidget):
             self._ensure_spec_registered(spec)
 
     def _ensure_spec_registered(self, spec: PluginSpec) -> type[NodeDataModel]:
-        model_cls = self._registered_specs.get(spec.id)
-        if model_cls is None:
+        entry = self._registered.get(spec.id)
+        if entry is None:
             model_cls = _make_plugin_model_class(spec)
             self._registry.register_model(model_cls, category="eggseis")
-            self._registered_specs[spec.id] = model_cls
-            self._spec_by_class[model_cls.__name__] = spec
-        return model_cls
+            self._registered[spec.id] = (model_cls, spec)
+            return model_cls
+        return entry[0]
+
+    def _spec_for_class(self, cls_name: str) -> PluginSpec | None:
+        for model_cls, spec in self._registered.values():
+            if model_cls.__name__ == cls_name:
+                return spec
+        return None
 
     def add_plugin(self, spec: PluginSpec, pos: tuple[float, float] | None = None) -> str:
         """Add a node for `spec` to the bound graph and scene; return node_id."""
@@ -453,7 +461,7 @@ class GraphCanvas(QWidget):
         if isinstance(scene_node.model, _SourceModel):
             return
         cls_name = type(scene_node.model).__name__
-        spec = self._spec_by_class.get(cls_name)
+        spec = self._spec_for_class(cls_name)
         if spec is None:
             return
         node = Node(spec=spec, params=spec.param_model())

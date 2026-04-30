@@ -20,17 +20,7 @@ import numpy as np
 
 from eggseis.axes import Axis
 from eggseis.data import SeismicVolume
-from eggseis.graph.model import SOURCE_ID, Graph
-
-
-def _read_source_at(volume: SeismicVolume, port: str, index: int) -> np.ndarray:
-    if port == "inline":
-        return volume.read_inline(index)
-    if port == "xline":
-        return volume.read_xline(index)
-    if port == "timeslice":
-        return volume.read_timeslice(index)
-    raise ValueError(f"unknown source port {port!r}")
+from eggseis.graph.model import SOURCE_ID, Graph, read_source_at
 
 
 def run_graph_on_section(
@@ -38,8 +28,15 @@ def run_graph_on_section(
     volume: SeismicVolume,
     axis: Axis | str,
     index: int,
+    *,
+    cone: list[str] | None = None,
 ) -> np.ndarray:
-    """Walk graph.tap_port's upstream cone synchronously and return the section."""
+    """Walk graph.tap_port's upstream cone synchronously and return the section.
+
+    Pass a precomputed `cone` to skip reverse-BFS + topo-sort on hot paths
+    where the graph topology is invariant across `index` (e.g. volume export
+    iterating every inline).
+    """
     axis_enum = axis if isinstance(axis, Axis) else Axis(axis)
     tap_node, tap_port = graph.tap_port
 
@@ -47,10 +44,19 @@ def run_graph_on_section(
         return volume.read_timeslice(index)
 
     if tap_node == SOURCE_ID:
-        return _read_source_at(volume, tap_port, index)
+        return read_source_at(volume, tap_port, index)
 
-    cone = graph.upstream_cone(tap_node, tap_port)
+    if cone is None:
+        cone = graph.upstream_cone(tap_node, tap_port)
     resolved: dict[tuple[str, str], np.ndarray] = {}
+    source_cache: dict[str, np.ndarray] = {}
+
+    def _src(port: str) -> np.ndarray:
+        arr = source_cache.get(port)
+        if arr is None:
+            arr = read_source_at(volume, port, index)
+            source_cache[port] = arr
+        return arr
 
     sample_rate = volume.geometry.sample_rate_ms
     base_context = {
@@ -69,7 +75,7 @@ def run_graph_on_section(
         if not node.enabled:
             edge = incoming[node.spec.inputs[0]]
             src = (
-                _read_source_at(volume, edge.src_port, index)
+                _src(edge.src_port)
                 if edge.src_node_id == SOURCE_ID
                 else resolved[(edge.src_node_id, edge.src_port)]
             )
@@ -81,7 +87,7 @@ def run_graph_on_section(
         for port in node.spec.inputs:
             edge = incoming[port]
             if edge.src_node_id == SOURCE_ID:
-                port_inputs[port] = _read_source_at(volume, edge.src_port, index)
+                port_inputs[port] = _src(edge.src_port)
             else:
                 port_inputs[port] = resolved[(edge.src_node_id, edge.src_port)]
 
@@ -155,12 +161,28 @@ def export_volume_with_graph(
     )
     time_axis = (np.arange(geometry.n_samples, dtype=np.float32) * geometry.sample_rate_ms)
 
+    n_bytes = geometry.n_inlines * geometry.n_xlines * geometry.n_samples * 4
+    if n_bytes > 8 * 1024 ** 3:  # 8 GB
+        raise MemoryError(
+            f"Export would allocate {n_bytes / 1024**3:.1f} GB in RAM "
+            "(in-memory cube cap is 8 GB). Streaming export is on the M7+ roadmap."
+        )
+
+    # Topology is invariant across inline index; resolve cone once.
+    tap_node, tap_port = graph.tap_port
+    if tap_node == SOURCE_ID:
+        cone = None
+    else:
+        cone = graph.upstream_cone(tap_node, tap_port)
+
     cube = np.empty(
         (geometry.n_inlines, geometry.n_xlines, geometry.n_samples), dtype=np.float32
     )
     total = geometry.n_inlines
     for k, inline in enumerate(inline_axis):
-        section = run_graph_on_section(graph, volume, Axis.INLINE, int(inline))
+        section = run_graph_on_section(
+            graph, volume, Axis.INLINE, int(inline), cone=cone
+        )
         cube[k] = section.astype(np.float32, copy=False)
         if on_progress is not None:
             on_progress(k + 1, total)

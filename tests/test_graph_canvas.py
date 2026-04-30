@@ -212,7 +212,7 @@ def test_register_specs_then_lib_create_syncs_to_graph(canvas, linear_attr):
     canvas.bind(g)
     canvas.register_specs([linear_attr])
 
-    model_cls = canvas._registered_specs[linear_attr.id]
+    model_cls, _ = canvas._registered[linear_attr.id]
     canvas._scene.create_node(model_cls)
 
     assert len(g.nodes) == 1

@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -39,7 +39,7 @@ class PluginSpec:
     accepts_context: bool
     inputs: tuple[str, ...] = ("trace",)
     output: str = "out"
-    kind: str = "transform"  # "transform" | "sink" — sinks run once per section.
+    kind: Literal["transform", "sink"] = "transform"
 
 
 _RESERVED_TRACE = ("trace", "traces", "context")
@@ -54,7 +54,7 @@ def _build_spec(
     inputs: tuple[str, ...],
     vectorized: bool,
     deterministic: bool,
-    kind: str = "transform",
+    kind: Literal["transform", "sink"] = "transform",
 ) -> PluginSpec:
     sig = inspect.signature(func)
     fields: dict[str, tuple[type, Any]] = {}
@@ -151,7 +151,7 @@ def graph_node(
     version: str = "0.1.0",
     inputs: tuple[str, ...] = ("input",),
     deterministic: bool = True,
-    kind: str = "transform",
+    kind: Literal["transform", "sink"] = "transform",
 ) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
     """Decorate a function as a graph-node plugin with N named input ports.
 

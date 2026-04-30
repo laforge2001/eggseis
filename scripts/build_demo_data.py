@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from mdio import to_mdio
+from scipy.ndimage import convolve1d
 
 
 def _ricker(n_samples: int, dt_ms: float, f_hz: float = 30.0) -> np.ndarray:
@@ -28,11 +29,9 @@ def _ricker(n_samples: int, dt_ms: float, f_hz: float = 30.0) -> np.ndarray:
 
 def _convolve_axis(reflectivity: np.ndarray, wavelet: np.ndarray) -> np.ndarray:
     """Convolve along the last (time) axis, keeping shape."""
-    out = np.zeros_like(reflectivity, dtype=np.float32)
-    for i in range(reflectivity.shape[0]):
-        for j in range(reflectivity.shape[1]):
-            out[i, j] = np.convolve(reflectivity[i, j], wavelet, mode="same")
-    return out
+    return convolve1d(
+        reflectivity, wavelet, axis=-1, mode="constant", cval=0.0
+    ).astype(np.float32)
 
 
 def build_wedge(path: Path) -> None:
