@@ -1,4 +1,4 @@
-"""Plugin API: @trace_attribute decorator and Param declarations."""
+"""Plugin API: @trace_attribute (single-input) and @graph_node (multi-input)."""
 
 from __future__ import annotations
 
@@ -41,8 +41,73 @@ class PluginSpec:
     output: str = "out"
 
 
-_RESERVED = ("trace", "traces", "context")
+_RESERVED_TRACE = ("trace", "traces", "context")
 _REGISTRY: dict[str, PluginSpec] = {}
+
+
+def _build_spec(
+    func: Callable[..., np.ndarray],
+    *,
+    name: str | None,
+    version: str,
+    inputs: tuple[str, ...],
+    vectorized: bool,
+    deterministic: bool,
+) -> PluginSpec:
+    sig = inspect.signature(func)
+    fields: dict[str, tuple[type, Any]] = {}
+    params_decl: dict[str, Param] = {}
+    accepts_context = "context" in sig.parameters
+    skip = set(inputs) | {"context"}
+
+    for pname, param in sig.parameters.items():
+        if pname in skip:
+            continue
+        if not isinstance(param.default, Param):
+            raise TypeError(
+                f"{func.__name__}: parameter {pname!r} must declare a "
+                f"Param(...) default"
+            )
+        p: Param = param.default
+        params_decl[pname] = p
+        if param.annotation is not inspect.Parameter.empty:
+            ftype = param.annotation
+        else:
+            ftype = type(p.default)
+        field = Field(
+            default=p.default,
+            title=p.label or pname,
+            description=p.description,
+            ge=p.min,
+            le=p.max,
+            json_schema_extra={
+                "step": p.step,
+                "units": p.units,
+                "choices": list(p.choices) if p.choices else None,
+            },
+        )
+        fields[pname] = (ftype, field)
+
+    model = create_model(
+        f"{func.__name__.title().replace('_', '')}Params",
+        __config__=ConfigDict(extra="forbid"),
+        **fields,
+    )
+
+    plugin_id = f"{func.__module__}.{func.__name__}"
+    return PluginSpec(
+        id=plugin_id,
+        name=name or func.__name__.replace("_", " ").title(),
+        func=func,
+        param_model=model,
+        params_decl=params_decl,
+        vectorized=vectorized,
+        deterministic=deterministic,
+        version=version,
+        source_path=getattr(inspect.getmodule(func), "__file__", None),
+        accepts_context=accepts_context,
+        inputs=inputs,
+    )
 
 
 def trace_attribute(
@@ -61,61 +126,55 @@ def trace_attribute(
     """
 
     def decorator(func: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
-        sig = inspect.signature(func)
-        fields: dict[str, tuple[type, Any]] = {}
-        params_decl: dict[str, Param] = {}
-        accepts_context = "context" in sig.parameters
-
-        for pname, param in sig.parameters.items():
-            if pname in _RESERVED:
-                continue
-            if not isinstance(param.default, Param):
-                raise TypeError(
-                    f"{func.__name__}: parameter {pname!r} must declare a "
-                    f"Param(...) default"
-                )
-            p: Param = param.default
-            params_decl[pname] = p
-            if param.annotation is not inspect.Parameter.empty:
-                ftype = param.annotation
-            else:
-                ftype = type(p.default)
-            field = Field(
-                default=p.default,
-                title=p.label or pname,
-                description=p.description,
-                ge=p.min,
-                le=p.max,
-                json_schema_extra={
-                    "step": p.step,
-                    "units": p.units,
-                    "choices": list(p.choices) if p.choices else None,
-                },
-            )
-            fields[pname] = (ftype, field)
-
-        model = create_model(
-            f"{func.__name__.title().replace('_', '')}Params",
-            __config__=ConfigDict(extra="forbid"),
-            **fields,
-        )
-
-        plugin_id = f"{func.__module__}.{func.__name__}"
         input_port = "traces" if vectorized else "trace"
-        spec = PluginSpec(
-            id=plugin_id,
-            name=name or func.__name__.replace("_", " ").title(),
-            func=func,
-            param_model=model,
-            params_decl=params_decl,
+        spec = _build_spec(
+            func,
+            name=name,
+            version=version,
+            inputs=(input_port,),
             vectorized=vectorized,
             deterministic=deterministic,
-            version=version,
-            source_path=getattr(inspect.getmodule(func), "__file__", None),
-            accepts_context=accepts_context,
-            inputs=(input_port,),
         )
-        _REGISTRY[plugin_id] = spec
+        _REGISTRY[spec.id] = spec
+        func._eggseis_spec = spec  # type: ignore[attr-defined]
+        return func
+
+    return decorator
+
+
+def graph_node(
+    *,
+    name: str | None = None,
+    version: str = "0.1.0",
+    inputs: tuple[str, ...] = ("input",),
+    deterministic: bool = True,
+) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
+    """Decorate a function as a graph-node plugin with N named input ports.
+
+    Each name in `inputs` must match a positional or keyword argument of the
+    function. The function receives those args as `np.ndarray` per port and
+    returns a single ndarray on output port `"out"`. Non-input args with a
+    `Param(...)` default become pydantic fields. An optional `context` arg
+    is treated as the per-call sidecar dict (same shape as `@trace_attribute`).
+    """
+
+    def decorator(func: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
+        sig = inspect.signature(func)
+        for input_name in inputs:
+            if input_name not in sig.parameters:
+                raise TypeError(
+                    f"{func.__name__}: declared input port {input_name!r} "
+                    f"is not a parameter of the function"
+                )
+        spec = _build_spec(
+            func,
+            name=name,
+            version=version,
+            inputs=inputs,
+            vectorized=False,
+            deterministic=deterministic,
+        )
+        _REGISTRY[spec.id] = spec
         func._eggseis_spec = spec  # type: ignore[attr-defined]
         return func
 
