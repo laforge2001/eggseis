@@ -39,6 +39,7 @@ gui = [
     "pydantic>=2.7",
     "magicgui>=0.9",
     "scipy>=1.13",
+    "qtpynodeeditor>=0.3.3",
 ]
 dev = [
     "pytest>=8.0",

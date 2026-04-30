@@ -139,6 +139,35 @@ def linear_spec():
 
 
 @pytest.fixture
+def subtract_spec():
+    """Multi-input plugin spec (a, b -> a - b). Built directly since
+    @trace_attribute is single-input only; @graph_node lands in M6 Step 3."""
+    from pydantic import BaseModel, ConfigDict
+
+    from eggseis.plugin import PluginSpec
+
+    def func(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        return a - b
+
+    class SubtractParams(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+
+    return PluginSpec(
+        id="tests.subtract",
+        name="Subtract",
+        func=func,
+        param_model=SubtractParams,
+        params_decl={},
+        vectorized=False,
+        deterministic=True,
+        version="0.1.0",
+        source_path=None,
+        accepts_context=False,
+        inputs=("a", "b"),
+    )
+
+
+@pytest.fixture
 def make_pipeline():
     """Build a Pipeline from a list of (spec, params) tuples or bare specs."""
     def _make(*specs_and_params):

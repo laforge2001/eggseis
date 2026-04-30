@@ -37,6 +37,8 @@ class PluginSpec:
     version: str
     source_path: str | None
     accepts_context: bool
+    inputs: tuple[str, ...] = ("trace",)
+    output: str = "out"
 
 
 _RESERVED = ("trace", "traces", "context")
@@ -99,6 +101,7 @@ def trace_attribute(
         )
 
         plugin_id = f"{func.__module__}.{func.__name__}"
+        input_port = "traces" if vectorized else "trace"
         spec = PluginSpec(
             id=plugin_id,
             name=name or func.__name__.replace("_", " ").title(),
@@ -110,6 +113,7 @@ def trace_attribute(
             version=version,
             source_path=getattr(inspect.getmodule(func), "__file__", None),
             accepts_context=accepts_context,
+            inputs=(input_port,),
         )
         _REGISTRY[plugin_id] = spec
         func._eggseis_spec = spec  # type: ignore[attr-defined]
