@@ -20,8 +20,10 @@ from eggseis.backends.mdio import MDIOBackend
 from eggseis.colormaps import LUTS_AVAILABLE
 from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
-from eggseis.pipeline import Pipeline, PipelineExecutor
-from eggseis.pipeline.dock import PipelineDock
+from eggseis.graph.canvas import GraphCanvas
+from eggseis.graph.executor import GraphExecutor
+from eggseis.graph.model import SOURCE_ID, Graph
+from eggseis.graph.param_dock import GraphParamDock
 from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
 from eggseis.plugin_template import create_template, open_in_editor
@@ -74,20 +76,27 @@ class MainWindow(QMainWindow):
         self._compute.sectionReady.connect(self._on_section_ready)
         self._compute.failed.connect(self._on_compute_failed)
 
-        self._executor = PipelineExecutor(self._compute)
+        self._executor = GraphExecutor(self._compute)
         self._executor.tapReady.connect(self._on_tap_ready)
         self._executor.failed.connect(self._on_chain_failed)
         self._executor.progress.connect(self._on_chain_progress)
 
-        self._pipelines: dict[str, Pipeline] = {}
+        self._graphs: dict[str, Graph] = {}
         self._active_survey_id: str | None = None
-        self._pipeline_dock = PipelineDock(
-            param_widget_factory=self._make_param_widget
+        self._canvas = GraphCanvas()
+        self._canvas_dock = QDockWidget("Graph", self)
+        self._canvas_dock.setWidget(self._canvas)
+        self._canvas_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self._canvas_dock)
+        self._canvas.edgeChanged.connect(self._request_tap)
+        self._canvas.tapPortChanged.connect(lambda _id, _port: self._request_tap())
+
+        self._graph_param_dock = GraphParamDock(self)
+        self.addDockWidget(Qt.RightDockWidgetArea, self._graph_param_dock)
+        self._graph_param_dock.paramsChanged.connect(self._on_node_params_changed)
+        self._canvas.selectionChanged.connect(
+            lambda nid: self._graph_param_dock.show_node(nid or None)
         )
-        self._pipeline_dock.pipelineChanged.connect(self._request_tap)
-        self._pipeline_dock.tapChanged.connect(lambda _id: self._request_tap())
-        self._pipeline_dock.add_button.clicked.connect(self._on_add_plugin_clicked)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self._pipeline_dock)
 
         self._build_menus()
         self._wire_signals()
@@ -258,13 +267,14 @@ class MainWindow(QMainWindow):
         volume = SeismicVolume(MDIOBackend(survey_path), name=survey_path.stem)
         survey_id = str(survey_path.resolve())
         self._active_survey_id = survey_id
-        self._pipelines.setdefault(survey_id, Pipeline())
+        self._graphs.setdefault(survey_id, Graph())
         self.section_viewer.set_volume(volume)
         self.slice_nav.set_geometry(volume.geometry)
-        self._pipeline_dock.bind(self._pipelines[survey_id])
-        # Only drive the executor when the pipeline has nodes; an empty
-        # pipeline means "show raw", which the section viewer already does.
-        if self._pipelines[survey_id].nodes:
+        self._canvas.bind(self._graphs[survey_id])
+        self._graph_param_dock.bind(self._graphs[survey_id])
+        # Only drive the executor when the graph has nodes; an empty graph
+        # taps Source, which the section viewer already paints raw.
+        if self._graphs[survey_id].nodes:
             self._request_tap()
 
     def set_colormap(self, name: str) -> None:
@@ -282,16 +292,15 @@ class MainWindow(QMainWindow):
             self.section_viewer.clear_overlay()
 
     def _on_slice_changed(self, axis, index) -> None:
-        # show_slice clears overlay internally; if a plugin or pipeline is
-        # active, recompute. The dock-driven pipeline takes precedence over
-        # the menu-driven single-attribute path so we don't paint two
-        # overlays in sequence.
+        # show_slice clears overlay internally; if a graph or plugin is
+        # active, recompute. The graph-driven path takes precedence over
+        # the menu-driven single-attribute path so we don't paint twice.
         self.section_viewer.show_slice(axis, index)
-        pipeline = (
-            self._pipelines.get(self._active_survey_id)
+        graph = (
+            self._graphs.get(self._active_survey_id)
             if self._active_survey_id else None
         )
-        if pipeline is not None and pipeline.nodes:
+        if graph is not None and graph.nodes:
             self._request_tap()
         elif self._active_plugin is not None:
             self._recompute_overlay()
@@ -335,37 +344,29 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"{name} failed: {message}", 5000)
 
-    def _make_param_widget(self, node):
-        widget = ParamDock()
-        widget.set_plugin(node.spec, params=node.params)
-        return widget
-
-    def _on_add_plugin_clicked(self) -> None:
-        specs = sorted(discover_all(), key=lambda s: s.name)
-        if not specs:
-            return
-        names = [s.name for s in specs]
-        choice, ok = QInputDialog.getItem(
-            self, "Add plugin", "Plugin:", names, 0, False
+    def _on_node_params_changed(self, node_id: str, params) -> None:
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
         )
-        if not ok:
+        if graph is None or node_id not in graph.nodes:
             return
-        spec = next(s for s in specs if s.name == choice)
-        self._pipeline_dock.add_plugin(spec)
+        graph.set_params(node_id, params)
+        self._request_tap()
 
     def _request_tap(self) -> None:
         volume = self.section_viewer.volume
         if volume is None or self._active_survey_id is None:
             return
-        pipeline = self._pipelines[self._active_survey_id]
-        if not pipeline.nodes:
-            # Empty chain — section viewer already paints raw. Skip the
-            # executor to avoid stamping a redundant raw overlay (which
-            # would set has_overlay=True even though no plugin is active).
+        graph = self._graphs[self._active_survey_id]
+        if not graph.nodes or graph.tap_port[0] == SOURCE_ID:
+            # Empty graph or Source-tap — section viewer paints raw via
+            # show_slice. Skip the executor to avoid stamping a redundant
+            # raw overlay.
             self.section_viewer.clear_overlay()
             return
         self._executor.request_tap(
-            pipeline,
+            graph,
             volume,
             self.section_viewer.current_axis,
             self.section_viewer.current_index,

@@ -134,6 +134,8 @@ class GraphCanvas(QWidget):
         self._registry.register_model(_SourceModel, category="eggseis")
         self._scene.connection_created.connect(self._on_lib_connection_created)
         self._scene.connection_deleted.connect(self._on_lib_connection_deleted)
+        self._scene.selectionChanged.connect(self._on_scene_selection_changed)
+        self._scene.node_double_clicked.connect(self._on_node_double_clicked)
 
     # --- public API ----------------------------------------------------
 
@@ -380,3 +382,23 @@ class GraphCanvas(QWidget):
         if edge in self._graph.edges:
             self._graph.disconnect(edge)
             self.edgeChanged.emit()
+
+    def _on_scene_selection_changed(self) -> None:
+        """Translate scene selection into a graph node_id (or empty)."""
+        selected = self._scene.selectedItems()
+        for item in selected:
+            scene_node = getattr(item, "node", None)
+            if scene_node is None:
+                continue
+            graph_id = self._scene_node_to_graph_id(scene_node)
+            if graph_id is not None and graph_id != SOURCE_ID:
+                self.selectionChanged.emit(graph_id)
+                return
+        self.selectionChanged.emit("")
+
+    def _on_node_double_clicked(self, scene_node) -> None:
+        """Double-click an output port -> tap that port."""
+        graph_id = self._scene_node_to_graph_id(scene_node)
+        if graph_id is None or graph_id == SOURCE_ID:
+            return
+        self.set_tap(graph_id, "out")

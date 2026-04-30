@@ -190,6 +190,36 @@ def test_user_drag_disconnect_syncs_to_graph(canvas, linear_attr):
     assert edge not in g.edges
 
 
+def test_selection_changed_emits_graph_node_id(canvas, linear_attr, qtbot):
+    g = Graph()
+    canvas.bind(g)
+    node_id = canvas.add_plugin(linear_attr)
+    scene_node = canvas.scene_node_for(node_id)
+
+    received = []
+    canvas.selectionChanged.connect(lambda nid: received.append(nid))
+
+    # Programmatically select the scene node by setting its graphics item
+    # selection state. qtpynodeeditor exposes the underlying QGraphicsItem.
+    scene_node.graphics_object.setSelected(True)
+    # selectionChanged fires synchronously from QGraphicsScene.
+    assert any(r == node_id for r in received)
+
+
+def test_double_click_node_taps_output(canvas, linear_attr, qtbot):
+    g = Graph()
+    canvas.bind(g)
+    node_id = canvas.add_plugin(linear_attr)
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", node_id, "traces"))
+
+    received = []
+    canvas.tapPortChanged.connect(lambda nid, port: received.append((nid, port)))
+    scene_node = canvas.scene_node_for(node_id)
+    canvas._scene.node_double_clicked.emit(scene_node)
+    assert (node_id, "out") in received
+    assert g.tap_port == (node_id, "out")
+
+
 def test_position_round_trips_through_bind(canvas, linear_attr):
     g = Graph()
     canvas.bind(g)
