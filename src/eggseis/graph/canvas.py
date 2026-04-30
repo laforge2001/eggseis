@@ -159,16 +159,21 @@ class GraphCanvas(QWidget):
         return node.node_id
 
     def _next_default_position(self) -> tuple[float, float]:
-        """Pick a position inside the current viewport, staggered to avoid overlap."""
+        """Pick a position inside the current viewport.
+
+        Cascade downward so the graph reads top-to-bottom — the lib's per-node
+        port orientation (input left, output right) stays unchanged, but
+        successive nodes stack vertically and wires flow downward across them.
+        """
         try:
             visible = self._view.mapToScene(self._view.viewport().rect()).boundingRect()
             cx = visible.left() + visible.width() * 0.4
-            cy = visible.top() + visible.height() * 0.5
+            cy = visible.top() + visible.height() * 0.15
         except Exception:
-            cx, cy = 200.0, 0.0
+            cx, cy = 200.0, 80.0
         n = len(self._graph.nodes) if self._graph is not None else 0
-        # Cascade right and down so successive adds don't overlap.
-        return (cx + 30.0 * (n % 4), cy + 60.0 * n)
+        # Cascade down with a small horizontal nudge per row.
+        return (cx + 20.0 * (n % 3), cy + 110.0 * n)
 
     def set_node_enabled(self, node_id: str, on: bool) -> None:
         """Enable/disable a node and re-render to reflect the visual state."""
