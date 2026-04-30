@@ -276,10 +276,11 @@ class GraphCanvas(QWidget):
             self._scene_nodes.clear()
             self._source_scene_node = None
 
-            # Re-spawn Source. Source stays movable + wireable; we only
-            # block selection (and therefore Delete) via selection-changed
-            # auto-deselect — locking would also kill drag + port wiring.
+            # Re-spawn Source. Source stays movable + wireable + selectable;
+            # only the Delete shortcut filters it out so the implicit root
+            # can't be destroyed.
             self._source_scene_node = self._scene.create_node(_SourceModel)
+            self._install_delete_filter()
         finally:
             self._suppress_signal_sync = False
 
@@ -482,18 +483,33 @@ class GraphCanvas(QWidget):
         self.nodeRemoved.emit(node_id)
         self.edgeChanged.emit()
 
-    def _on_scene_selection_changed(self) -> None:
-        """Translate scene selection into a graph node_id (or empty).
+    def _install_delete_filter(self) -> None:
+        """Replace the lib's Delete-key slot with one that excludes Source."""
+        action = self._view.delete_selection_action()
+        try:
+            action.triggered.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        action.triggered.connect(self._delete_selected_excluding_source)
 
-        Force-deselects Source so the Delete shortcut never targets it.
-        """
+    def _delete_selected_excluding_source(self) -> None:
+        if self._source_scene_node is None:
+            self._view.delete_selected()
+            return
+        src_go = self._source_scene_node.graphics_object
+        was_selected = src_go.isSelected()
+        if was_selected:
+            src_go.setSelected(False)
+        try:
+            self._view.delete_selected()
+        finally:
+            if was_selected and self._source_scene_node is not None:
+                # Restore the visual selection state if Source survived.
+                self._source_scene_node.graphics_object.setSelected(True)
+
+    def _on_scene_selection_changed(self) -> None:
+        """Translate scene selection into a graph node_id (or empty)."""
         selected = self._scene.selectedItems()
-        if self._source_scene_node is not None:
-            src_go = self._source_scene_node.graphics_object
-            if src_go.isSelected():
-                src_go.setSelected(False)
-                # The setSelected call re-emits selectionChanged; re-read.
-                selected = self._scene.selectedItems()
         for item in selected:
             scene_node = getattr(item, "node", None)
             if scene_node is None:

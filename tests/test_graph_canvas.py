@@ -236,14 +236,13 @@ def test_delete_action_removes_node_from_graph(canvas, linear_attr, qtbot):
     assert all(node_id not in (e.src_node_id, e.dst_node_id) for e in g.edges)
 
 
-def test_source_node_auto_deselects(canvas, qtbot):
-    """Selecting Source must force-deselect it so Delete-key can't target it."""
+def test_source_node_is_selectable_for_visual_feedback(canvas, qtbot):
+    """Source can be selected (selection highlight shows); Delete-key filters."""
     g = Graph()
     canvas.bind(g)
     src = canvas._source_scene_node
     src.graphics_object.setSelected(True)
-    # Selection-changed handler forces it back off.
-    assert src.graphics_object.isSelected() is False
+    assert src.graphics_object.isSelected() is True
 
 
 def test_delete_selected_keeps_source(canvas, linear_attr, qtbot):
