@@ -220,6 +220,32 @@ def test_register_specs_then_lib_create_syncs_to_graph(canvas, linear_attr):
     assert only.spec.id == linear_attr.id
 
 
+def test_delete_action_removes_node_from_graph(canvas, linear_attr, qtbot):
+    """Lib's Delete-key action drives node_deleted -> Graph.remove_node."""
+    g = Graph()
+    canvas.bind(g)
+    node_id = canvas.add_plugin(linear_attr)
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", node_id, "traces"))
+
+    # Simulate the lib's "delete selected" path: select then call delete_selected.
+    scene_node = canvas.scene_node_for(node_id)
+    scene_node.graphics_object.setSelected(True)
+    canvas._view.delete_selected()
+
+    assert node_id not in g.nodes
+    assert all(node_id not in (e.src_node_id, e.dst_node_id) for e in g.edges)
+
+
+def test_source_node_locked_against_deletion(canvas, qtbot):
+    """Source node must be unselectable so Delete-key can't remove it."""
+    g = Graph()
+    canvas.bind(g)
+    src = canvas._source_scene_node
+    src.graphics_object.setSelected(True)
+    # Lock prevents selection — verify it stuck.
+    assert src.graphics_object.isSelected() is False
+
+
 def test_canvas_does_not_tap_on_double_click(canvas, linear_attr, qtbot):
     """Double-click is consumed by MainWindow for params popup, not by canvas."""
     g = Graph()

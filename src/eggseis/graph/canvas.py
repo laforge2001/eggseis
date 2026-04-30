@@ -137,6 +137,7 @@ class GraphCanvas(QWidget):
         self._scene.connection_deleted.connect(self._on_lib_connection_deleted)
         self._scene.selectionChanged.connect(self._on_scene_selection_changed)
         self._scene.node_created.connect(self._on_lib_node_created)
+        self._scene.node_deleted.connect(self._on_lib_node_deleted)
         # Note: double-click is intentionally NOT consumed here. MainWindow
         # routes node_double_clicked to a parameters popup; tap-on-output
         # lives on the right-click context menu instead.
@@ -266,13 +267,21 @@ class GraphCanvas(QWidget):
     # --- rendering ------------------------------------------------------
 
     def _rerender(self) -> None:
-        # Wipe scene.
-        self._scene.clear_scene()
-        self._scene_nodes.clear()
-        self._source_scene_node = None
+        self._suppress_signal_sync = True
+        try:
+            # Wipe scene; clear_scene fires node_deleted/connection_deleted
+            # for each removed item — our handlers must not echo into the
+            # model, which still holds the canonical state we're rendering.
+            self._scene.clear_scene()
+            self._scene_nodes.clear()
+            self._source_scene_node = None
 
-        # Re-spawn Source.
-        self._source_scene_node = self._scene.create_node(_SourceModel)
+            # Re-spawn Source. Locked so the lib's Delete shortcut + selection
+            # semantics can't remove or move it (Source is the implicit root).
+            self._source_scene_node = self._scene.create_node(_SourceModel)
+            self._source_scene_node.graphics_object.lock(True)
+        finally:
+            self._suppress_signal_sync = False
 
         if self._graph is None:
             return
@@ -457,6 +466,21 @@ class GraphCanvas(QWidget):
         self._graph.add_node(node)
         self._scene_nodes[node.node_id] = scene_node
         self.nodeAdded.emit(node.node_id)
+
+    def _on_lib_node_deleted(self, scene_node) -> None:
+        """User pressed Delete on a selected node — mirror into the model."""
+        if self._suppress_signal_sync or self._graph is None:
+            return
+        if scene_node is self._source_scene_node:
+            return  # Should not happen (Source is locked) — defensive.
+        node_id = self._scene_node_to_graph_id(scene_node)
+        if node_id is None or node_id == SOURCE_ID:
+            return
+        if node_id in self._graph.nodes:
+            self._graph.remove_node(node_id)
+        self._scene_nodes.pop(node_id, None)
+        self.nodeRemoved.emit(node_id)
+        self.edgeChanged.emit()
 
     def _on_scene_selection_changed(self) -> None:
         """Translate scene selection into a graph node_id (or empty)."""
