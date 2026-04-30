@@ -97,6 +97,11 @@ class MainWindow(QMainWindow):
         self._active_survey_id: str | None = None
         self._canvas.edgeChanged.connect(self._request_tap)
         self._canvas.tapPortChanged.connect(lambda _id, _port: self._request_tap())
+        # Pre-register every discovered plugin so qtpynodeeditor's
+        # right-click "Add Node" menu shows the full library.
+        self._canvas.register_specs(discover_all())
+        # Auto-tap any newly added node (covers menu adds and right-click).
+        self._canvas.nodeAdded.connect(lambda nid: self._canvas.set_tap(nid, "out"))
 
         # Double-click → modeless params popup. Replaces the previous tap-on-
         # double-click behaviour; tap stays on the right-click context menu.
@@ -362,15 +367,14 @@ class MainWindow(QMainWindow):
     def add_plugin_to_graph(self, spec: PluginSpec) -> str | None:
         """Add a node for `spec` to the active survey's graph + canvas.
 
-        Auto-taps the new node so the section repaints to its output as soon
-        as its inputs are wired. Returns the new node_id, or None if no
-        survey is active.
+        Auto-tap is wired through canvas.nodeAdded -> set_tap so this is the
+        same flow whether the node arrives via the Graph menu or the canvas
+        right-click 'Add Node' submenu. Returns the new node_id, or None
+        if no survey is active.
         """
         if self._active_survey_id is None:
             return None
-        node_id = self._canvas.add_plugin(spec)
-        self._canvas.set_tap(node_id, "out")
-        return node_id
+        return self._canvas.add_plugin(spec)
 
     def _on_node_double_clicked_open_params(self, scene_node) -> None:
         node_id = self._canvas._scene_node_to_graph_id(scene_node)

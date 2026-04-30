@@ -206,6 +206,20 @@ def test_selection_changed_emits_graph_node_id(canvas, linear_attr, qtbot):
     assert any(r == node_id for r in received)
 
 
+def test_register_specs_then_lib_create_syncs_to_graph(canvas, linear_attr):
+    """Pre-register a spec; lib-side scene.create_node mirrors into Graph."""
+    g = Graph()
+    canvas.bind(g)
+    canvas.register_specs([linear_attr])
+
+    model_cls = canvas._registered_specs[linear_attr.id]
+    canvas._scene.create_node(model_cls)
+
+    assert len(g.nodes) == 1
+    only = next(iter(g.nodes.values()))
+    assert only.spec.id == linear_attr.id
+
+
 def test_canvas_does_not_tap_on_double_click(canvas, linear_attr, qtbot):
     """Double-click is consumed by MainWindow for params popup, not by canvas."""
     g = Graph()

@@ -125,6 +125,7 @@ class GraphCanvas(QWidget):
         self._scene_nodes: dict[str, qne.Node] = {}  # graph node_id -> scene node
         self._source_scene_node: qne.Node | None = None
         self._registered_specs: dict[str, type[NodeDataModel]] = {}
+        self._spec_by_class: dict[str, PluginSpec] = {}
         self._suppress_signal_sync = False
 
         layout = QVBoxLayout(self)
@@ -135,6 +136,7 @@ class GraphCanvas(QWidget):
         self._scene.connection_created.connect(self._on_lib_connection_created)
         self._scene.connection_deleted.connect(self._on_lib_connection_deleted)
         self._scene.selectionChanged.connect(self._on_scene_selection_changed)
+        self._scene.node_created.connect(self._on_lib_node_created)
         # Note: double-click is intentionally NOT consumed here. MainWindow
         # routes node_double_clicked to a parameters popup; tap-on-output
         # lives on the right-click context menu instead.
@@ -145,6 +147,25 @@ class GraphCanvas(QWidget):
         """Wipe the scene and render `graph` from scratch."""
         self._graph = graph
         self._rerender()
+
+    def register_specs(self, specs) -> None:
+        """Pre-register plugin specs so they show in the lib's right-click menu.
+
+        qtpynodeeditor's FlowView builds its 'create node' context menu from
+        DataModelRegistry.categories(); only registered models appear there.
+        Call this once at MainWindow setup to surface all discovered plugins.
+        """
+        for spec in specs:
+            self._ensure_spec_registered(spec)
+
+    def _ensure_spec_registered(self, spec: PluginSpec) -> type[NodeDataModel]:
+        model_cls = self._registered_specs.get(spec.id)
+        if model_cls is None:
+            model_cls = _make_plugin_model_class(spec)
+            self._registry.register_model(model_cls, category="eggseis")
+            self._registered_specs[spec.id] = model_cls
+            self._spec_by_class[model_cls.__name__] = spec
+        return model_cls
 
     def add_plugin(self, spec: PluginSpec, pos: tuple[float, float] | None = None) -> str:
         """Add a node for `spec` to the bound graph and scene; return node_id."""
@@ -265,13 +286,12 @@ class GraphCanvas(QWidget):
             self._spawn_scene_edge(edge)
 
     def _spawn_scene_node(self, node: Node) -> None:
-        spec = node.spec
-        model_cls = self._registered_specs.get(spec.id)
-        if model_cls is None:
-            model_cls = _make_plugin_model_class(spec)
-            self._registry.register_model(model_cls, category="eggseis")
-            self._registered_specs[spec.id] = model_cls
-        scene_node = self._scene.create_node(model_cls)
+        model_cls = self._ensure_spec_registered(node.spec)
+        self._suppress_signal_sync = True
+        try:
+            scene_node = self._scene.create_node(model_cls)
+        finally:
+            self._suppress_signal_sync = False
         self._scene_nodes[node.node_id] = scene_node
         if node.pos != (0.0, 0.0):
             scene_node.position = node.pos
@@ -414,6 +434,29 @@ class GraphCanvas(QWidget):
         if edge in self._graph.edges:
             self._graph.disconnect(edge)
             self.edgeChanged.emit()
+
+    def _on_lib_node_created(self, scene_node) -> None:
+        """User created a node via the lib's right-click 'Add Node' menu."""
+        if self._suppress_signal_sync or self._graph is None:
+            return
+        # Source is a singleton; ignore lib-side creates of it.
+        if isinstance(scene_node.model, _SourceModel):
+            return
+        cls_name = type(scene_node.model).__name__
+        spec = self._spec_by_class.get(cls_name)
+        if spec is None:
+            return
+        node = Node(spec=spec, params=spec.param_model())
+        # Read the position the lib placed the node at (ContextMenuEvent
+        # passes the mouse position to scene.create_node).
+        try:
+            pos = scene_node.position
+            node.pos = (pos.x(), pos.y())
+        except Exception:
+            pass
+        self._graph.add_node(node)
+        self._scene_nodes[node.node_id] = scene_node
+        self.nodeAdded.emit(node.node_id)
 
     def _on_scene_selection_changed(self) -> None:
         """Translate scene selection into a graph node_id (or empty)."""
