@@ -32,16 +32,18 @@ class TileRunnable(QRunnable):
             params_dump = job.params.model_dump()
             if job.spec.vectorized:
                 compute_tile(
-                    job.spec, params_dump, job.section, job.context,
+                    job.spec, params_dump, job.context,
                     start=self._tile.start, stop=self._tile.stop, out=job.output,
+                    inputs=job.inputs,
                 )
             else:
                 for i in range(self._tile.start, self._tile.stop):
                     if job.token.cancelled:
                         return
                     compute_tile(
-                        job.spec, params_dump, job.section, job.context,
+                        job.spec, params_dump, job.context,
                         start=i, stop=i + 1, out=job.output,
+                        inputs=job.inputs,
                     )
 
             if not job.token.cancelled:

@@ -30,29 +30,43 @@ def make_trace_context(
 def compute_tile(
     spec: PluginSpec,
     params_dump: dict[str, Any],
-    section: np.ndarray,
     context: dict[str, Any],
     *,
     start: int,
     stop: int,
     out: np.ndarray,
+    inputs: dict[str, np.ndarray] | None = None,
+    section: np.ndarray | None = None,
 ) -> None:
-    """Run `spec` over `section[start:stop]`, writing into `out[start:stop]`.
+    """Run `spec` over `inputs[port][start:stop]` for each declared port.
 
-    Used directly by tile workers and indirectly (whole-section call) by
-    the synchronous `run_on_section` below.
+    `inputs` is a dict keyed by `spec.inputs` port names. For single-input
+    legacy callers, `section=` is accepted as a positional alias and
+    normalised to `{spec.inputs[0]: section}`.
+
+    Tile workers slice each input the same way (axis-0 from start..stop)
+    and dispatch by port name.
     """
+    if inputs is None:
+        if section is None:
+            raise TypeError("compute_tile: pass either `inputs` or `section`")
+        inputs = {spec.inputs[0]: section}
+
     kwargs = dict(params_dump)
     if spec.accepts_context:
         kwargs["context"] = context
 
     if spec.vectorized:
-        result = spec.func(traces=section[start:stop], **kwargs).astype(np.float32)
+        # Vectorized = single-input by construction; M6 multi-input plugins
+        # are scalar-call-per-row.
+        port = spec.inputs[0]
+        result = spec.func(**{port: inputs[port][start:stop]}, **kwargs).astype(np.float32)
         out[start:stop] = result
         return
 
     for i in range(start, stop):
-        out[i] = spec.func(section[i], **kwargs)
+        port_args = {p: inputs[p][i] for p in spec.inputs}
+        out[i] = spec.func(**port_args, **kwargs)
 
 
 def run_on_section(
@@ -81,10 +95,10 @@ def run_on_section(
     compute_tile(
         spec,
         params.model_dump(),
-        section,
         make_trace_context(volume, axis, index),
         start=0,
         stop=section.shape[0],
         out=out,
+        section=section,
     )
     return out

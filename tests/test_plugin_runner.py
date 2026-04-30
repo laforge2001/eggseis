@@ -105,7 +105,7 @@ def test_compute_tile_writes_only_requested_range(fake_backend):
     spec = envelope._eggseis_spec
     context = {"sample_rate_ms": vol.geometry.sample_rate_ms,
                "axis": "inline", "index": vol.geometry.inline_min}
-    compute_tile(spec, {}, section, context, start=2, stop=5, out=out)
+    compute_tile(spec, {}, context, start=2, stop=5, out=out, section=section)
 
     # Rows 2..4 written, others untouched.
     assert (out[:2] == 0).all()

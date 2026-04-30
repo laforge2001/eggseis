@@ -78,17 +78,24 @@ class JobOrchestrator(QObject):
         index: int,
         *,
         input_section: np.ndarray | None = None,
+        input_sections: dict[str, np.ndarray] | None = None,
         chain_hash: str | None = None,
         skip_cache_write: bool = False,
     ) -> None:
         axis_enum = Axis(axis)
+        if input_sections is not None and input_section is not None:
+            raise TypeError("pass either input_section or input_sections, not both")
+        if input_sections is None and input_section is not None:
+            input_sections = {spec.inputs[0]: input_section}
+        if input_sections is not None:
+            input_sections = {k: v.copy() for k, v in input_sections.items()}
         self._pending = {
             "spec": spec,
             "params": params,
             "volume": volume,
             "axis": axis_enum,
             "index": index,
-            "input_section": None if input_section is None else input_section.copy(),
+            "input_sections": input_sections,
             "chain_hash": chain_hash,
             "skip_cache_write": skip_cache_write,
         }
@@ -128,35 +135,40 @@ class JobOrchestrator(QObject):
         index: int = req["index"]
 
         if axis is Axis.TIMESLICE:
-            override = req["input_section"]
-            ts = override if override is not None else volume.read_timeslice(index)
+            overrides = req["input_sections"]
+            if overrides is not None and spec.inputs[0] in overrides:
+                ts = overrides[spec.inputs[0]]
+            else:
+                ts = volume.read_timeslice(index)
             self.sectionReady.emit(Job().id, ts)
             return
 
-        if req["input_section"] is not None:
-            section = req["input_section"]
+        if req["input_sections"] is not None:
+            inputs = req["input_sections"]
         else:
-            section = (
+            raw = (
                 volume.read_inline(index) if axis is Axis.INLINE else volume.read_xline(index)
             )
+            inputs = {spec.inputs[0]: raw}
 
         if self._active is not None:
             self._active.token.cancel()
 
+        first_input = inputs[spec.inputs[0]]
         job = Job(
             spec=spec,
             params=params,
             volume=volume,
             axis=axis,
             index=index,
-            section=section,
-            output=np.empty_like(section, dtype=np.float32),
+            inputs=inputs,
+            output=np.empty_like(first_input, dtype=np.float32),
             context=make_trace_context(volume, axis, index),
             cache_key=req.get("key"),
             skip_cache_write=req.get("skip_cache_write", False),
         )
         self._active = job
-        tiles = split_section(section.shape[0], TILE_SIZE)
+        tiles = split_section(first_input.shape[0], TILE_SIZE)
         self._tiles_remaining = len(tiles)
         self._delivered_ranges.clear()
         self._delivery.start()

@@ -41,9 +41,16 @@ class Job:
     volume: SeismicVolume | None = None
     axis: Axis = Axis.INLINE
     index: int = 0
-    section: np.ndarray | None = None
+    inputs: dict[str, np.ndarray] = field(default_factory=dict)
     output: np.ndarray | None = None
     context: dict[str, Any] = field(default_factory=dict)
     token: CancellationToken = field(default_factory=CancellationToken)
     cache_key: Any = None  # CacheKey, set at dispatch; reused on finalize.
     skip_cache_write: bool = False  # True for nodes downstream of non-deterministic chain.
+
+    @property
+    def section(self) -> np.ndarray | None:
+        """Back-compat alias for the first declared input port's array."""
+        if self.spec is None or not self.inputs:
+            return None
+        return self.inputs.get(self.spec.inputs[0])

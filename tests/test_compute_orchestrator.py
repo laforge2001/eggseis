@@ -30,7 +30,7 @@ def test_tile_runnable_writes_into_job_output(qtbot, envelope_spec_and_section):
     job = Job(
         spec=spec,
         params=spec.param_model(),
-        section=section,
+        inputs={spec.inputs[0]: section},
         output=np.zeros_like(section, dtype=np.float32),
         context={"sample_rate_ms": 4.0, "axis": "inline", "index": 100},
     )
@@ -51,7 +51,7 @@ def test_tile_runnable_skips_when_token_already_cancelled(qtbot, envelope_spec_a
     job = Job(
         spec=spec,
         params=spec.param_model(),
-        section=section,
+        inputs={spec.inputs[0]: section},
         output=np.zeros_like(section, dtype=np.float32),
         context={"sample_rate_ms": 4.0, "axis": "inline", "index": 100},
     )
