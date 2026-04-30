@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QFileDialog,
     QInputDialog,
@@ -286,21 +287,37 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"eggseis — {self._project.name}")
 
     def open_survey(self, survey_path: Path) -> None:
-        volume = SeismicVolume(MDIOBackend(survey_path), name=survey_path.stem)
-        survey_id = str(survey_path.resolve())
-        self._active_survey_id = survey_id
-        self._graphs.setdefault(survey_id, Graph())
-        self.section_viewer.set_volume(volume)
-        self.slice_nav.set_geometry(volume.geometry)
-        self._canvas.bind(self._graphs[survey_id])
-        # Close any params popups left over from the previous survey.
-        for popup in list(self._params_popups.values()):
-            popup.close()
-        self._params_popups.clear()
-        # Only drive the executor when the graph has nodes; an empty graph
-        # taps Source, which the section viewer already paints raw.
-        if self._graphs[survey_id].nodes:
-            self._request_tap()
+        # Visual feedback first: status bar + busy progress + wait cursor.
+        # processEvents pumps the GUI so the user sees the indicator before
+        # the synchronous backend open + first inline read block the thread.
+        self.statusBar().showMessage(f"Loading {survey_path.name}…")
+        progress = QProgressDialog(
+            f"Loading {survey_path.name}…", None, 0, 0, self
+        )
+        progress.setWindowTitle("Open Survey")
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        QApplication.processEvents()
+
+        try:
+            volume = SeismicVolume(MDIOBackend(survey_path), name=survey_path.stem)
+            survey_id = str(survey_path.resolve())
+            self._active_survey_id = survey_id
+            self._graphs.setdefault(survey_id, Graph())
+            self.section_viewer.set_volume(volume)
+            self.slice_nav.set_geometry(volume.geometry)
+            self._canvas.bind(self._graphs[survey_id])
+            for popup in list(self._params_popups.values()):
+                popup.close()
+            self._params_popups.clear()
+            if self._graphs[survey_id].nodes:
+                self._request_tap()
+        finally:
+            QApplication.restoreOverrideCursor()
+            progress.close()
+            self.statusBar().showMessage(f"Loaded {survey_path.name}", 3000)
 
     def set_colormap(self, name: str) -> None:
         self.section_viewer.set_colormap(name)
