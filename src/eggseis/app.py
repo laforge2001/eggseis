@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QApplication,
     QDockWidget,
     QFileDialog,
     QInputDialog,
     QMainWindow,
+    QMenu,
     QMessageBox,
+    QProgressDialog,
     QSplitter,
 )
 
@@ -20,8 +24,10 @@ from eggseis.backends.mdio import MDIOBackend
 from eggseis.colormaps import LUTS_AVAILABLE
 from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
-from eggseis.pipeline import Pipeline, PipelineExecutor
-from eggseis.pipeline.dock import PipelineDock
+from eggseis.graph.canvas import GraphCanvas
+from eggseis.graph.executor import GraphExecutor
+from eggseis.graph.model import SOURCE_ID, Graph
+from eggseis.graph.params_popup import NodeParamsPopup
 from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
 from eggseis.plugin_template import create_template, open_in_editor
@@ -43,26 +49,37 @@ class MainWindow(QMainWindow):
         self.tree = ProjectTreeWidget()
         self.section_viewer = SectionViewer()
         self.slice_nav = SliceNavigator()
-        self.param_dock = ParamDock()
+        self.param_dock = ParamDock()  # Legacy single-attribute param editor.
 
-        right = QSplitter(Qt.Vertical)
-        right.addWidget(self.section_viewer)
-        right.addWidget(self.slice_nav)
-        right.setStretchFactor(0, 1)
+        # Three-pane layout:
+        #   tree (far left) | section viewer + slice nav (center) | graph canvas (right)
+        viewer_pane = QSplitter(Qt.Vertical)
+        viewer_pane.addWidget(self.section_viewer)
+        viewer_pane.addWidget(self.slice_nav)
+        viewer_pane.setStretchFactor(0, 1)
+
+        self._canvas = GraphCanvas()
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.tree)
-        splitter.addWidget(right)
+        splitter.addWidget(viewer_pane)
+        splitter.addWidget(self._canvas)
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 1)
+        splitter.setSizes([220, 600, 380])
         self.setCentralWidget(splitter)
 
-        self._param_dock_widget = QDockWidget("Parameters", self)
+        # Legacy Attribute-menu param dock kept around for the menu-driven
+        # path but hidden by default. Floats if the user enables it.
+        self._param_dock_widget = QDockWidget("Parameters (legacy)", self)
         self._param_dock_widget.setWidget(self.param_dock)
         self._param_dock_widget.setAllowedAreas(
             Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea
         )
         self.addDockWidget(Qt.RightDockWidgetArea, self._param_dock_widget)
         self.param_dock.setMinimumWidth(260)
+        self._param_dock_widget.setVisible(False)
 
         self._project: Project | None = None
         self._active_plugin: PluginSpec | None = None
@@ -74,20 +91,27 @@ class MainWindow(QMainWindow):
         self._compute.sectionReady.connect(self._on_section_ready)
         self._compute.failed.connect(self._on_compute_failed)
 
-        self._executor = PipelineExecutor(self._compute)
+        self._executor = GraphExecutor(self._compute)
         self._executor.tapReady.connect(self._on_tap_ready)
         self._executor.failed.connect(self._on_chain_failed)
         self._executor.progress.connect(self._on_chain_progress)
 
-        self._pipelines: dict[str, Pipeline] = {}
+        self._graphs: dict[str, Graph] = {}
         self._active_survey_id: str | None = None
-        self._pipeline_dock = PipelineDock(
-            param_widget_factory=self._make_param_widget
-        )
-        self._pipeline_dock.pipelineChanged.connect(self._request_tap)
-        self._pipeline_dock.tapChanged.connect(lambda _id: self._request_tap())
-        self._pipeline_dock.add_button.clicked.connect(self._on_add_plugin_clicked)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self._pipeline_dock)
+        self._canvas.edgeChanged.connect(self._request_tap)
+        self._canvas.tapPortChanged.connect(lambda _id, _port: self._request_tap())
+        # Pre-register every discovered plugin so qtpynodeeditor's
+        # right-click "Add Node" menu shows the full library.
+        self._canvas.register_specs(discover_all())
+        # Auto-tap any newly added node (covers menu adds and right-click).
+        self._canvas.nodeAdded.connect(lambda nid: self._canvas.set_tap(nid, "out"))
+
+        # Double-click → modeless params popup. Replaces the previous tap-on-
+        # double-click behaviour; tap stays on the right-click context menu.
+        self._params_popups: dict[str, NodeParamsPopup] = {}
+        self._canvas._scene.node_double_clicked.connect(self._on_node_double_clicked_open_params)
+        self._canvas.nodeRemoved.connect(self._close_popup_for_node)
+        self._canvas._scene.node_context_menu.connect(self._on_node_context_menu)
 
         self._build_menus()
         self._wire_signals()
@@ -121,6 +145,15 @@ class MainWindow(QMainWindow):
         self._lock_levels_action.setChecked(self.section_viewer.levels_locked)
         self._lock_levels_action.toggled.connect(self.section_viewer.set_levels_locked)
         m_view.addAction(self._lock_levels_action)
+
+        m_graph = self.menuBar().addMenu("&Graph")
+        a_add_node = QAction("&Add Plugin to Graph…", self)
+        a_add_node.triggered.connect(self._on_add_node_to_graph)
+        m_graph.addAction(a_add_node)
+        m_graph.addSeparator()
+        a_export = QAction("&Export Volume with Graph Applied…", self)
+        a_export.triggered.connect(self._on_export_volume)
+        m_graph.addAction(a_export)
 
         m_attr = self.menuBar().addMenu("&Attribute")
         self._attr_group = QActionGroup(self)
@@ -255,17 +288,48 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"eggseis — {self._project.name}")
 
     def open_survey(self, survey_path: Path) -> None:
-        volume = SeismicVolume(MDIOBackend(survey_path), name=survey_path.stem)
-        survey_id = str(survey_path.resolve())
-        self._active_survey_id = survey_id
-        self._pipelines.setdefault(survey_id, Pipeline())
-        self.section_viewer.set_volume(volume)
-        self.slice_nav.set_geometry(volume.geometry)
-        self._pipeline_dock.bind(self._pipelines[survey_id])
-        # Only drive the executor when the pipeline has nodes; an empty
-        # pipeline means "show raw", which the section viewer already does.
-        if self._pipelines[survey_id].nodes:
-            self._request_tap()
+        if getattr(self, "_opening_survey", False):
+            return  # Defensive: ignore re-entry from rapid double-clicks.
+        self._opening_survey = True
+        try:
+            with self._busy_progress(
+                title="Open Survey", message=f"Loading {survey_path.name}…"
+            ):
+                volume = SeismicVolume(MDIOBackend(survey_path), name=survey_path.stem)
+                survey_id = str(survey_path.resolve())
+                self._active_survey_id = survey_id
+                self._graphs.setdefault(survey_id, Graph())
+                self.section_viewer.set_volume(volume)
+                self.slice_nav.set_geometry(volume.geometry)
+                self._canvas.bind(self._graphs[survey_id])
+                self._close_all_popups()
+                if self._graphs[survey_id].nodes:
+                    self._request_tap()
+            self.statusBar().showMessage(f"Loaded {survey_path.name}", 3000)
+        finally:
+            self._opening_survey = False
+
+    def _close_all_popups(self) -> None:
+        for popup in list(self._params_popups.values()):
+            popup.close()
+        self._params_popups.clear()
+
+    @contextmanager
+    def _busy_progress(self, title: str, message: str):
+        """Show a busy QProgressDialog + WaitCursor while a synchronous block runs."""
+        self.statusBar().showMessage(message)
+        progress = QProgressDialog(message, None, 0, 0, self)
+        progress.setWindowTitle(title)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+        QApplication.processEvents()
+        try:
+            yield progress
+        finally:
+            QApplication.restoreOverrideCursor()
+            progress.close()
 
     def set_colormap(self, name: str) -> None:
         self.section_viewer.set_colormap(name)
@@ -282,16 +346,15 @@ class MainWindow(QMainWindow):
             self.section_viewer.clear_overlay()
 
     def _on_slice_changed(self, axis, index) -> None:
-        # show_slice clears overlay internally; if a plugin or pipeline is
-        # active, recompute. The dock-driven pipeline takes precedence over
-        # the menu-driven single-attribute path so we don't paint two
-        # overlays in sequence.
+        # show_slice clears overlay internally; if a graph or plugin is
+        # active, recompute. The graph-driven path takes precedence over
+        # the menu-driven single-attribute path so we don't paint twice.
         self.section_viewer.show_slice(axis, index)
-        pipeline = (
-            self._pipelines.get(self._active_survey_id)
+        graph = (
+            self._graphs.get(self._active_survey_id)
             if self._active_survey_id else None
         )
-        if pipeline is not None and pipeline.nodes:
+        if graph is not None and graph.nodes:
             self._request_tap()
         elif self._active_plugin is not None:
             self._recompute_overlay()
@@ -335,41 +398,179 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(f"{name} failed: {message}", 5000)
 
-    def _make_param_widget(self, node):
-        widget = ParamDock()
-        widget.set_plugin(node.spec, params=node.params)
-        return widget
+    def add_plugin_to_graph(self, spec: PluginSpec) -> str | None:
+        """Add a node for `spec` to the active survey's graph + canvas.
 
-    def _on_add_plugin_clicked(self) -> None:
+        Auto-tap is wired through canvas.nodeAdded -> set_tap so this is the
+        same flow whether the node arrives via the Graph menu or the canvas
+        right-click 'Add Node' submenu. Returns the new node_id, or None
+        if no survey is active.
+        """
+        if self._active_survey_id is None:
+            return None
+        return self._canvas.add_plugin(spec)
+
+    def _on_node_double_clicked_open_params(self, scene_node) -> None:
+        node_id = self._canvas._scene_node_to_graph_id(scene_node)
+        if node_id is None or node_id == SOURCE_ID:
+            return
+        graph = self._graphs[self._active_survey_id]
+        node = graph.nodes[node_id]
+
+        existing = self._params_popups.get(node_id)
+        if existing is not None and not existing.isHidden():
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        popup = NodeParamsPopup(node, parent=self)
+        popup.paramsChanged.connect(self._on_node_params_changed)
+        popup.finished.connect(lambda _result, nid=node_id: self._params_popups.pop(nid, None))
+        self._params_popups[node_id] = popup
+        popup.show()
+
+    def _close_popup_for_node(self, node_id: str) -> None:
+        popup = self._params_popups.pop(node_id, None)
+        if popup is not None:
+            popup.close()
+
+    def _on_node_context_menu(self, scene_node, _scene_pos, screen_pos) -> None:
+        node_id = self._canvas._scene_node_to_graph_id(scene_node)
+        if node_id is None or node_id == SOURCE_ID:
+            return
+        graph = self._graphs[self._active_survey_id]
+        node = graph.nodes[node_id]
+        is_multi_input = len(node.spec.inputs) > 1
+
+        menu = QMenu(self)
+        if is_multi_input:
+            action_disable = QAction("Disable (multi-input not allowed)", self)
+            action_disable.setEnabled(False)
+            menu.addAction(action_disable)
+        else:
+            label = "Enable" if not node.enabled else "Disable"
+            action_toggle = QAction(label, self)
+            action_toggle.triggered.connect(
+                lambda _checked, nid=node_id, on=not node.enabled:
+                    self._canvas.set_node_enabled(nid, on)
+            )
+            menu.addAction(action_toggle)
+        action_tap = QAction("Tap output", self)
+        action_tap.triggered.connect(
+            lambda _checked, nid=node_id: self._canvas.set_tap(nid, "out")
+        )
+        menu.addAction(action_tap)
+        menu.addSeparator()
+        action_remove = QAction("Remove node", self)
+        action_remove.triggered.connect(
+            lambda _checked, nid=node_id: self._canvas.remove_node(nid)
+        )
+        menu.addAction(action_remove)
+        menu.exec_(screen_pos)
+
+    def _on_export_volume(self) -> None:
+        from eggseis.graph.runner import export_volume_with_graph
+
+        if self._active_survey_id is None:
+            self.statusBar().showMessage("Open a survey first.", 3000)
+            return
+        out_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Volume", "", "MDIO (*.mdio);;All files (*)"
+        )
+        if not out_path:
+            return
+        graph = self._graphs[self._active_survey_id]
+        volume = self.section_viewer.volume
+        n_il = volume.geometry.n_inlines
+
+        progress = QProgressDialog(
+            "Exporting volume with graph applied…", "Cancel", 0, n_il, self
+        )
+        progress.setWindowTitle("Export")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        cancelled = {"v": False}
+
+        def on_progress(done: int, total: int) -> None:
+            progress.setValue(done)
+            if progress.wasCanceled():
+                cancelled["v"] = True
+                raise InterruptedError("export cancelled by user")
+
+        try:
+            export_volume_with_graph(graph, volume, out_path, on_progress=on_progress)
+        except InterruptedError:
+            self.statusBar().showMessage("Export cancelled.", 3000)
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, "Export failed", repr(exc))
+            return
+        progress.setValue(n_il)
+        self.statusBar().showMessage(f"Wrote {out_path}", 5000)
+
+    def _on_add_node_to_graph(self) -> None:
+        if self._active_survey_id is None:
+            self.statusBar().showMessage("Open a survey first.", 3000)
+            return
         specs = sorted(discover_all(), key=lambda s: s.name)
         if not specs:
             return
         names = [s.name for s in specs]
         choice, ok = QInputDialog.getItem(
-            self, "Add plugin", "Plugin:", names, 0, False
+            self, "Add Plugin to Graph", "Plugin:", names, 0, False
         )
         if not ok:
             return
         spec = next(s for s in specs if s.name == choice)
-        self._pipeline_dock.add_plugin(spec)
+        self.add_plugin_to_graph(spec)
+
+    def _on_node_params_changed(self, node_id: str, params) -> None:
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        if graph is None or node_id not in graph.nodes:
+            return
+        graph.set_params(node_id, params)
+        self._request_tap()
 
     def _request_tap(self) -> None:
         volume = self.section_viewer.volume
         if volume is None or self._active_survey_id is None:
             return
-        pipeline = self._pipelines[self._active_survey_id]
-        if not pipeline.nodes:
-            # Empty chain — section viewer already paints raw. Skip the
-            # executor to avoid stamping a redundant raw overlay (which
-            # would set has_overlay=True even though no plugin is active).
+        graph = self._graphs[self._active_survey_id]
+        if not graph.nodes or graph.tap_port[0] == SOURCE_ID:
+            # Empty graph or Source-tap — section viewer paints raw via
+            # show_slice. Skip the executor to avoid stamping a redundant
+            # raw overlay.
+            self.section_viewer.clear_overlay()
+            return
+        # Mid-wiring: the user has tapped a node whose inputs aren't all
+        # connected yet. Stay on raw rather than firing a failed signal —
+        # the executor would just emit "input port unconnected".
+        tap_node, _ = graph.tap_port
+        if not self._cone_fully_wired(graph, tap_node):
             self.section_viewer.clear_overlay()
             return
         self._executor.request_tap(
-            pipeline,
+            graph,
             volume,
             self.section_viewer.current_axis,
             self.section_viewer.current_index,
         )
+
+    def _cone_fully_wired(self, graph: Graph, tap_node: str) -> bool:
+        from eggseis.graph.model import SOURCE_ID as _SRC
+        for nid in graph.upstream_cone(tap_node, "out"):
+            if nid == _SRC:
+                continue
+            node = graph.nodes[nid]
+            incoming = graph.incoming_edges(nid)
+            for port in node.spec.inputs:
+                if port not in incoming:
+                    return False
+        return True
 
     def _on_chain_progress(self, current: int, total: int, name: str) -> None:
         self.statusBar().showMessage(f"Computing {current} of {total}: {name}…")

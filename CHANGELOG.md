@@ -2,6 +2,48 @@
 
 All notable changes to eggseis are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [PEP 440](https://peps.python.org/pep-0440/).
 
+## [0.1.0a6] — 2026-04-30
+
+**M6 — "The graph branches" complete.**
+
+### Added
+- `eggseis.graph` package: `Graph`, `Node`, `Edge`, `CycleError`, `OrphanPluginError`, `GraphExecutor`, `GraphCanvas`, `GraphParamDock`, `SOURCE_ID`, `SOURCE_PORTS`.
+- DAG topology with N-input / 1-output nodes and an implicit `Source` (id `"source"`) emitting raw section reads on three output ports `inline` / `xline` / `timeslice`. Cycles rejected at edge-creation time via DFS forward from the new edge's destination.
+- `Graph.port_hash(node_id, port, volume_version, axis)` — blake2b digest of the upstream cone of an output port. Source ports key off `(volume_version, axis, port)`. Each enabled node folds in `(plugin_id, version, params_hash, sorted_input_port_hashes)`. Disabled single-input nodes pass parent's hash through (skip = identity); multi-input nodes can't be disabled.
+- `@graph_node(*, name, version, inputs=("input",), deterministic=True)` decorator for multi-input plugins. `@trace_attribute` continues to work as the single-input shorthand and now populates `PluginSpec.inputs` from the vectorized flag (`"trace"` or `"traces"`).
+- Built-in `subtract` plugin (`a, b → a - b`) — first multi-input attribute.
+- `JobOrchestrator.request` accepts `input_sections=dict[port_name, ndarray]`. `compute_tile` slices each declared input by axis-0 `[start:stop]` and dispatches by port name. Single-input legacy callers still pass `input_section=arr`; the orchestrator normalises.
+- `GraphExecutor(QObject)`: walks the upstream cone of the tap port, looks up each output's `port_hash` in the cache, topologically executes the cold subgraph. Multi-input nodes block advancement until every input port has a resolved array. Disabled identity-skip handled in a flat loop.
+- `GraphCanvas(QWidget)` — `qtpynodeeditor`-backed visual node-graph. Pre-validates every wire against `Graph.has_cycle_if_added` (lib's `ConnectionCycleFailure` is a backstop with dangling-port cleanup). User-drag of a wire syncs into the model via `connection_created`/`connection_deleted` signals; suppress flag prevents echo when our own `connect_edge` mutates the scene first. Source node singleton, dynamic per-spec `NodeDataModel` subclass cached by plugin id, position round-trips through `bind()` after `to_dict`/`from_dict`. Selection emits a graph node id; double-clicking a node taps its `out` port.
+- `MainWindow` rewired into a 3-pane layout: project tree (left) | section viewer + slice nav (center) | graph canvas (right) — all in one horizontal `QSplitter`. Empty-graph or Source-tap short-circuits to the section viewer's raw paint.
+- `NodeParamsPopup` — modeless `QDialog` opened on canvas-node double-click. Multiple popups can stay open at once; `paramsChanged(node_id, params)` flows back to `Graph.set_params + _request_tap`. Survey-switch closes any leftover popups.
+- Graph menu: **Add Plugin to Graph…** (input dialog over discovered plugins) and **Export Volume with Graph Applied…** (file dialog → `QProgressDialog` with cancel; iterates every inline through the synchronous runner and writes a new MDIO).
+- Canvas right-click adds: every discovered plugin pre-registered into qtpynodeeditor's `DataModelRegistry` so the lib's built-in "Add Node" context menu lists the full library with filter + category tree. `node_created` signal mirrors lib-side adds back into `Graph`. Auto-tap on `nodeAdded` covers menu adds and right-click adds.
+- Per-node right-click context menu (Enable / Disable / Tap output / Remove); multi-input nodes show Disable greyed (identity-skip is undefined).
+- Delete-key removes selected nodes (lib's `delete_selection_action` rewired through `_install_delete_filter` so Source is excluded). Source stays movable + wireable + selectable for visual feedback; only the Delete shortcut filters it.
+- `eggseis.graph.runner` — synchronous graph runner (no Qt, no orchestrator, no cache). `run_graph_on_section` walks the upstream cone topologically; `export_volume_with_graph` iterates every inline, hoists cone resolution, memoises Source-port reads per call, and writes a new MDIO. 8 GB in-memory cap protects against accidental OOM on large surveys.
+- `save_section_npy` builtin — first **sink-kind** plugin: side-effects once at the section level (writes the input to a `.npy` file) and passes its input through unchanged. `PluginSpec.kind: Literal["transform", "sink"]` controls the executor + runner branching.
+- `open_survey` shows a busy `QProgressDialog` + WaitCursor while MDIO opens (so the user sees feedback during the synchronous load); re-entry guard ignores rapid double-clicks.
+- New synthetic demo datasets shipped alongside the existing `demo.mdio`: `examples/demo-project/wedge.mdio` (32×24×96, dipping reflectors + channel feature, Ricker-convolved) and `checkerboard.mdio` (20×16×80, alternating amplitude blocks). `scripts/build_demo_data.py` regenerates them.
+- `examples/canvas_spike.py` — spike artefact validating qtpynodeeditor's multi-input + signals + cycle detection on PySide6 6.11 / Python 3.12.
+- `M6-PLAN.md` documents the milestone, library spike findings, and outstanding follow-ups.
+
+### Changed
+- `PluginSpec` gains `inputs: tuple[str, ...]` (default `("trace",)`) and `output: str` (default `"out"`) fields. Decorators populate them; serialisation passes the value through.
+- `Job.section` becomes a back-compat property reading `inputs[spec.inputs[0]]`. New code uses `Job.inputs: dict[str, np.ndarray]`.
+- `pyproject.toml` `gui` extra adds `qtpynodeeditor>=0.3.3`. Per-file ruff ignores extended for `src/eggseis/graph/*.py` (Qt camelCase signals) and `src/eggseis/graph/canvas.py` (RUF012 — qtpynodeeditor `NodeDataModel` requires class-level dicts).
+
+### Notes
+- The M5 `eggseis.pipeline` package is retained on disk so the M5 test suite keeps passing, but the GUI no longer touches it. A scheduled remote agent (2026-05-14) checks orphan status and opens a deletion PR.
+- DAG persistence to disk remains M7's concern. Multiple output ports per node, cross-tile-cross-node parallelism, multi-source graphs, vertical port orientation, and subgraphs are out of scope for v1.0.
+- 282 tests at the M6 cut. CI matrix green across macOS / Ubuntu / Windows × Python 3.11 / 3.12.
+
+### Known limitations (deferred)
+- **Multi-source graphs.** One implicit Source per graph today. Cross-survey ops (e.g. subtract two different MDIO datasets) need a per-survey Source kind + multi-volume executor — M7 or v1.1.
+- **Vertical port orientation.** qtpynodeeditor's per-node ports are fixed input-left / output-right. True top/bottom ports need subclassing `NodeGeometry` + `NodePainter` + connection-bezier math. Cascade direction matches port flow (rightward).
+- **Streaming volume export.** `export_volume_with_graph` allocates the full output cube in RAM; surveys >8 GB raise `MemoryError`. Streaming write via `xr.Dataset.to_zarr(region=...)` is M7+.
+- **Undo / redo keybind.** `Graph.undo()` / `Graph.redo()` exist but no `Ctrl+Z` shortcut on the canvas. Polish item.
+
 ## [0.1.0a5] — 2026-04-29
 
 **M5 — "The pipeline chains" complete.**

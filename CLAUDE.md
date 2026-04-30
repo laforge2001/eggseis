@@ -33,6 +33,7 @@
 - Branch protection on `main` requires PR review — CLI `gh pr merge` is blocked without `--admin`. Don't bypass without explicit user OK.
 - On milestone completion, follow the wrap-up rule (see memory): audit ROADMAP exit criteria → CHANGELOG entry → README status → next-milestone issue + branch → tag after merge.
 - Pre-commit hook in `.githooks/pre-commit` auto-refreshes the M2 screenshot when UI sources are staged. Enable per-clone via `./scripts/test.sh hooks`.
+- **GUI screenshot rule:** any substantial GUI change MUST regenerate `docs/m2-screenshot.png` before commit. Run `./scripts/test.sh shot` and stage the PNG alongside the source change. Don't rely on the pre-commit hook — verify the screenshot reflects the new state. Substantial = new dock, new menu, layout shift, new widget, anything visible from the rendered window.
 
 ## Dev doc
 - `docs/development.md` — local workflow, headless mechanics, shortcuts, troubleshooting. Cross-link from any new contributor-facing change.

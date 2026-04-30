@@ -6,4 +6,6 @@ from eggseis.builtins import (  # noqa: F401
     instantaneous_phase,
     ormsby_bandpass,
     rms_amplitude,
+    save_section_npy,
+    subtract,
 )

@@ -68,7 +68,7 @@ def test_main_window_menus(qtbot):
 
     bar = win.menuBar()
     titles = [a.text().replace("&", "") for a in bar.actions()]
-    assert titles == ["File", "View", "Attribute", "Help"]
+    assert titles == ["File", "View", "Graph", "Attribute", "Help"]
     _ = Qt
 
 
@@ -283,10 +283,11 @@ def test_slice_change_preserves_active_params(qtbot, demo_project_path):
     assert win._active_params is snapshot
 
 
-def test_chain_three_attributes_tap_each(qtbot, demo_project_path):
+def test_graph_chain_three_attributes_tap_each(qtbot, demo_project_path):
     from eggseis.builtins.envelope import envelope
     from eggseis.builtins.ormsby_bandpass import ormsby_bandpass
     from eggseis.builtins.rms_amplitude import rms_amplitude
+    from eggseis.graph.model import SOURCE_ID, Edge
 
     win = MainWindow()
     qtbot.addWidget(win)
@@ -296,16 +297,71 @@ def test_chain_three_attributes_tap_each(qtbot, demo_project_path):
     win.tree.itemDoubleClicked.emit(survey_item, 0)
     qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
 
-    dock = win._pipeline_dock
-    for spec_func in (ormsby_bandpass, envelope, rms_amplitude):
-        spec = spec_func._eggseis_spec
-        with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
-            dock.add_plugin(spec)
+    canvas = win._canvas
+    a = canvas.add_plugin(ormsby_bandpass._eggseis_spec)
+    b = canvas.add_plugin(envelope._eggseis_spec)
+    c = canvas.add_plugin(rms_amplitude._eggseis_spec)
 
-    pipeline = win._pipelines[win._active_survey_id]
-    assert len(pipeline.nodes) == 3
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", a, "trace"))
+    canvas.connect_edge(Edge(a, "out", b, "trace"))
+    canvas.connect_edge(Edge(b, "out", c, "trace"))
 
-    for node in pipeline.nodes:
+    graph = win._graphs[win._active_survey_id]
+    assert len(graph.nodes) == 3
+
+    for node_id in (a, b, c):
         with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
-            dock.row_widget(node.node_id).tap_radio.setChecked(True)
+            canvas.set_tap(node_id, "out")
         assert win.section_viewer.has_overlay
+
+
+def test_graph_menu_adds_node_to_canvas(qtbot, demo_project_path):
+    from eggseis.builtins.envelope import envelope
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Empty graph initially.
+    g = win._graphs[win._active_survey_id]
+    assert len(g.nodes) == 0
+
+    win.add_plugin_to_graph(envelope._eggseis_spec)
+    assert len(g.nodes) == 1
+    only = next(iter(g.nodes.values()))
+    assert only.spec.id == envelope._eggseis_spec.id
+
+
+def test_graph_menu_action_exists(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    actions = {a.text().replace("&", ""): a for a in win.menuBar().actions()}
+    assert "Graph" in actions, f"expected Graph menu, got {list(actions)}"
+
+
+def test_graph_subtract_tap_ready(qtbot, demo_project_path):
+    """Multi-input subtract: a→sub.a, source→sub.b. Tap sub.out."""
+    from eggseis.builtins.envelope import envelope
+    from eggseis.builtins.subtract import subtract
+    from eggseis.graph.model import SOURCE_ID, Edge
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    canvas = win._canvas
+    env = canvas.add_plugin(envelope._eggseis_spec)
+    sub = canvas.add_plugin(subtract._eggseis_spec)
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", env, "trace"))
+    canvas.connect_edge(Edge(env, "out", sub, "a"))
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", sub, "b"))
+
+    with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
+        canvas.set_tap(sub, "out")
+    assert win.section_viewer.has_overlay
