@@ -152,13 +152,23 @@ class GraphCanvas(QWidget):
         if pos is not None:
             node.pos = pos
         else:
-            # Auto-stagger so new nodes don't stack on Source at (0, 0).
-            n = len(self._graph.nodes)
-            node.pos = (220.0 + 180.0 * (n % 4), 60.0 * (n // 4) + 40.0 * (n % 4))
+            node.pos = self._next_default_position()
         self._graph.add_node(node)
         self._spawn_scene_node(node)
         self.nodeAdded.emit(node.node_id)
         return node.node_id
+
+    def _next_default_position(self) -> tuple[float, float]:
+        """Pick a position inside the current viewport, staggered to avoid overlap."""
+        try:
+            visible = self._view.mapToScene(self._view.viewport().rect()).boundingRect()
+            cx = visible.left() + visible.width() * 0.4
+            cy = visible.top() + visible.height() * 0.5
+        except Exception:
+            cx, cy = 200.0, 0.0
+        n = len(self._graph.nodes) if self._graph is not None else 0
+        # Cascade right and down so successive adds don't overlap.
+        return (cx + 30.0 * (n % 4), cy + 60.0 * n)
 
     def remove_node(self, node_id: str) -> None:
         if self._graph is None:

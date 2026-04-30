@@ -100,6 +100,12 @@ class MainWindow(QMainWindow):
         self._canvas.selectionChanged.connect(
             lambda nid: self._graph_param_dock.show_node(nid or None)
         )
+        # Keep the param dock in sync as the canvas grows / shrinks.
+        self._canvas.nodeAdded.connect(
+            lambda nid: (self._graph_param_dock.refresh(),
+                         self._graph_param_dock.show_node(nid))
+        )
+        self._canvas.nodeRemoved.connect(lambda _nid: self._graph_param_dock.refresh())
 
         self._build_menus()
         self._wire_signals()
@@ -355,11 +361,15 @@ class MainWindow(QMainWindow):
     def add_plugin_to_graph(self, spec: PluginSpec) -> str | None:
         """Add a node for `spec` to the active survey's graph + canvas.
 
-        Returns the new node_id, or None if no survey is active.
+        Auto-taps the new node so the section repaints to its output as soon
+        as its inputs are wired. Returns the new node_id, or None if no
+        survey is active.
         """
         if self._active_survey_id is None:
             return None
-        return self._canvas.add_plugin(spec)
+        node_id = self._canvas.add_plugin(spec)
+        self._canvas.set_tap(node_id, "out")
+        return node_id
 
     def _on_add_node_to_graph(self) -> None:
         if self._active_survey_id is None:
@@ -398,12 +408,31 @@ class MainWindow(QMainWindow):
             # raw overlay.
             self.section_viewer.clear_overlay()
             return
+        # Mid-wiring: the user has tapped a node whose inputs aren't all
+        # connected yet. Stay on raw rather than firing a failed signal —
+        # the executor would just emit "input port unconnected".
+        tap_node, _ = graph.tap_port
+        if not self._cone_fully_wired(graph, tap_node):
+            self.section_viewer.clear_overlay()
+            return
         self._executor.request_tap(
             graph,
             volume,
             self.section_viewer.current_axis,
             self.section_viewer.current_index,
         )
+
+    def _cone_fully_wired(self, graph: Graph, tap_node: str) -> bool:
+        from eggseis.graph.model import SOURCE_ID as _SRC
+        for nid in graph.upstream_cone(tap_node, "out"):
+            if nid == _SRC:
+                continue
+            node = graph.nodes[nid]
+            incoming = graph.incoming_edges(nid)
+            for port in node.spec.inputs:
+                if port not in incoming:
+                    return False
+        return True
 
     def _on_chain_progress(self, current: int, total: int, name: str) -> None:
         self.statusBar().showMessage(f"Computing {current} of {total}: {name}…")
