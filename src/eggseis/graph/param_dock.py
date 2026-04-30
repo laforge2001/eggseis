@@ -19,7 +19,7 @@ class GraphParamDock(QDockWidget):
     paramsChanged = Signal(str, object)  # node_id, pydantic BaseModel
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__("Parameters", parent)
+        super().__init__("Node Parameters", parent)
         self._graph: Graph | None = None
         self._inner: dict[str, ParamDock] = {}
         self._stack = QStackedWidget(self)

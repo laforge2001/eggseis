@@ -65,6 +65,9 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.RightDockWidgetArea, self._param_dock_widget)
         self.param_dock.setMinimumWidth(260)
+        # Legacy Attribute-menu param editor — hidden by default since M6's
+        # GraphParamDock supersedes it for canvas-driven workflows.
+        self._param_dock_widget.setVisible(False)
 
         self._project: Project | None = None
         self._active_plugin: PluginSpec | None = None
