@@ -265,3 +265,38 @@ def my_random(trace, gain: float = Param(1.0)):
 > outputs are simply never memoised, so revisiting the same params
 > and slice always recomputes. Prefer `deterministic=True` whenever
 > your plugin's output is a pure function of its input and parameters.
+
+## Multi-input plugins (M6+)
+
+`@trace_attribute` is the single-input shorthand. For plugins that take
+two or more named input arrays — e.g. `subtract(a, b)` — use
+`@graph_node`:
+
+```python
+import numpy as np
+from eggseis.plugin import graph_node
+
+@graph_node(name="Subtract", version="0.1.0", inputs=("a", "b"))
+def subtract(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return a - b
+```
+
+- Each name in `inputs` must match a positional or keyword argument
+  of the function. Those arguments receive `np.ndarray` values, one
+  per port, sliced consistently along the trace axis.
+- Non-input arguments still need a `Param(...)` default.
+- An optional `context` arg works exactly as with `@trace_attribute`.
+- The function's return value is emitted on the single output port
+  `"out"`. Multiple outputs per node are deferred to v1.1.
+- `vectorized=True` is single-input only — multi-input plugins run
+  one row at a time. If you need vectorisation, restructure into
+  separate single-input attributes plus a downstream combiner.
+
+In the GUI, the canvas renders one input port circle per name in
+`inputs`. Wires must land on each of them before the node can run;
+an unconnected input emits a clear error message via the executor's
+`failed` signal.
+
+**Disabling a multi-input node is not allowed.** Identity-skip is only
+well-defined when there is one upstream array to forward through.
+Remove the node instead.

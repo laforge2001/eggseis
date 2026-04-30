@@ -2,6 +2,34 @@
 
 All notable changes to eggseis are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [PEP 440](https://peps.python.org/pep-0440/).
 
+## [0.1.0a6] — 2026-04-30
+
+**M6 — "The graph branches" complete.**
+
+### Added
+- `eggseis.graph` package: `Graph`, `Node`, `Edge`, `CycleError`, `OrphanPluginError`, `GraphExecutor`, `GraphCanvas`, `GraphParamDock`, `SOURCE_ID`, `SOURCE_PORTS`.
+- DAG topology with N-input / 1-output nodes and an implicit `Source` (id `"source"`) emitting raw section reads on three output ports `inline` / `xline` / `timeslice`. Cycles rejected at edge-creation time via DFS forward from the new edge's destination.
+- `Graph.port_hash(node_id, port, volume_version, axis)` — blake2b digest of the upstream cone of an output port. Source ports key off `(volume_version, axis, port)`. Each enabled node folds in `(plugin_id, version, params_hash, sorted_input_port_hashes)`. Disabled single-input nodes pass parent's hash through (skip = identity); multi-input nodes can't be disabled.
+- `@graph_node(*, name, version, inputs=("input",), deterministic=True)` decorator for multi-input plugins. `@trace_attribute` continues to work as the single-input shorthand and now populates `PluginSpec.inputs` from the vectorized flag (`"trace"` or `"traces"`).
+- Built-in `subtract` plugin (`a, b → a - b`) — first multi-input attribute.
+- `JobOrchestrator.request` accepts `input_sections=dict[port_name, ndarray]`. `compute_tile` slices each declared input by axis-0 `[start:stop]` and dispatches by port name. Single-input legacy callers still pass `input_section=arr`; the orchestrator normalises.
+- `GraphExecutor(QObject)`: walks the upstream cone of the tap port, looks up each output's `port_hash` in the cache, topologically executes the cold subgraph. Multi-input nodes block advancement until every input port has a resolved array. Disabled identity-skip handled in a flat loop.
+- `GraphCanvas(QWidget)` — `qtpynodeeditor`-backed visual node-graph. Pre-validates every wire against `Graph.has_cycle_if_added` (lib's `ConnectionCycleFailure` is a backstop with dangling-port cleanup). User-drag of a wire syncs into the model via `connection_created`/`connection_deleted` signals; suppress flag prevents echo when our own `connect_edge` mutates the scene first. Source node singleton, dynamic per-spec `NodeDataModel` subclass cached by plugin id, position round-trips through `bind()` after `to_dict`/`from_dict`. Selection emits a graph node id; double-clicking a node taps its `out` port.
+- `GraphParamDock(QDockWidget)` — `QStackedWidget` of M5-style ParamDocks keyed by node id. `bind()` rebuilds widgets and is rebind-safe; `show_node` switches active widget; `paramsChanged(node_id, params)` flows back to MainWindow.
+- `MainWindow` rewired: `_graphs: dict[survey_id, Graph]` per-survey, GraphCanvas in the left dock area, GraphParamDock on the right, GraphExecutor as the chain coordinator. Canvas `selectionChanged → param_dock.show_node`, `edgeChanged` and `tapPortChanged → _request_tap`. Empty-graph or Source-tap short-circuits to the section viewer's raw paint.
+- `examples/canvas_spike.py` — spike artefact validating qtpynodeeditor's multi-input + signals + cycle detection on PySide6 6.11 / Python 3.12.
+- `M6-PLAN.md` documents the milestone, library spike findings, and outstanding follow-ups.
+
+### Changed
+- `PluginSpec` gains `inputs: tuple[str, ...]` (default `("trace",)`) and `output: str` (default `"out"`) fields. Decorators populate them; serialisation passes the value through.
+- `Job.section` becomes a back-compat property reading `inputs[spec.inputs[0]]`. New code uses `Job.inputs: dict[str, np.ndarray]`.
+- `pyproject.toml` `gui` extra adds `qtpynodeeditor>=0.3.3`. Per-file ruff ignores extended for `src/eggseis/graph/*.py` (Qt camelCase signals) and `src/eggseis/graph/canvas.py` (RUF012 — qtpynodeeditor `NodeDataModel` requires class-level dicts).
+
+### Notes
+- The M5 `eggseis.pipeline` package is retained on disk so the M5 test suite keeps passing, but the GUI no longer touches it. Cleanup deferred to the next milestone where pipeline-shaped imports become orphaned.
+- DAG persistence to disk remains M7's concern. Multiple output ports per node, cross-tile-cross-node parallelism, and subgraphs are out of scope for v1.0.
+- 272 tests at the M6 cut. CI matrix green across macOS / Ubuntu / Windows × Python 3.11 / 3.12 (pending remote CI run).
+
 ## [0.1.0a5] — 2026-04-29
 
 **M5 — "The pipeline chains" complete.**

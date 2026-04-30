@@ -205,3 +205,52 @@ Mechanics:
 - **Timeslice axis** bypasses the chain entirely. Trace-local plugins
   do not apply to a horizontal slice; the viewer paints raw amplitude
   until the user switches to inline or xline.
+
+## How graphs work in the GUI (M6+)
+
+M6 generalises the M5 linear pipeline into a directed acyclic graph.
+Linear chains keep working — they're a degenerate DAG — but multi-input
+plugins (e.g. `subtract(a, b)`) are now first-class and the active UI
+is a visual node-graph canvas instead of a list-style dock.
+
+- **Per-survey scope.** Each opened survey gets its own `Graph`, kept
+  in memory for the session. Same shape as the M5 pipeline; same
+  M7-owned persistence story.
+
+- **Implicit Source node.** Every graph has a non-removable `Source`
+  with three output ports (`inline`, `xline`, `timeslice`). The canvas
+  renders it; programmatic access uses `eggseis.graph.SOURCE_ID`. The
+  active section axis chooses which output port feeds downstream.
+
+- **DAG topology.** Nodes have N named input ports and a single
+  output port `"out"` (multi-output is v1.1). Cycles are rejected at
+  edge-creation time via `Graph.has_cycle_if_added`. Each input port
+  accepts at most one edge; rewiring replaces. Output ports fan out
+  arbitrarily.
+
+- **Cache via `port_hash`.** Each output port has a blake2b digest
+  folding in plugin id, version, params, and the sorted hashes of
+  upstream input ports. Source ports key off
+  `(volume_version, axis, port_name)`. The M4 `SectionLRU` is reused —
+  no parallel cache. Disabled single-input nodes pass parent's hash
+  through unchanged (skip = identity); multi-input nodes can't be
+  disabled because identity-skip isn't well-defined for them.
+
+- **Tap-anywhere.** The tap is a `(node_id, port_name)` pair. Source
+  short-circuits to a raw axis read. Double-clicking a node on the
+  canvas taps its `out` port. The section viewer paints whatever the
+  tap port produces.
+
+- **Visual canvas (`qtpynodeeditor`).** The lib's data-propagation is
+  ignored — our `NodeDataModel` subclasses' `set_in_data` is a no-op
+  and we never emit `data_updated`. All compute lives in
+  `GraphExecutor`. Cycle detection runs on our `Graph` model first;
+  the lib's `ConnectionCycleFailure` is a backstop with dangling-port
+  cleanup. User-drag of a wire on the canvas mirrors into the model
+  through `connection_created` / `connection_deleted` signals.
+
+- **Layout.** GraphCanvas lives in the left dock area; the per-node
+  parameter editor (`GraphParamDock`) on the right; section viewer
+  remains the central workspace. The legacy menu-driven `Attribute`
+  path is still available alongside the canvas for quick single-attribute
+  applies.
