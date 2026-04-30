@@ -159,21 +159,21 @@ class GraphCanvas(QWidget):
         return node.node_id
 
     def _next_default_position(self) -> tuple[float, float]:
-        """Pick a position inside the current viewport.
+        """Pick a position inside the current viewport, cascading rightward.
 
-        Cascade downward so the graph reads top-to-bottom — the lib's per-node
-        port orientation (input left, output right) stays unchanged, but
-        successive nodes stack vertically and wires flow downward across them.
+        Per-node ports are input-left / output-right (lib default; vertical
+        port orientation is not supported by qtpynodeeditor). Cascade matches
+        port flow: new nodes appear to the right of existing ones with a
+        small vertical nudge per column.
         """
         try:
             visible = self._view.mapToScene(self._view.viewport().rect()).boundingRect()
-            cx = visible.left() + visible.width() * 0.4
-            cy = visible.top() + visible.height() * 0.15
+            cx = visible.left() + visible.width() * 0.2
+            cy = visible.top() + visible.height() * 0.4
         except Exception:
-            cx, cy = 200.0, 80.0
+            cx, cy = 200.0, 0.0
         n = len(self._graph.nodes) if self._graph is not None else 0
-        # Cascade down with a small horizontal nudge per row.
-        return (cx + 20.0 * (n % 3), cy + 110.0 * n)
+        return (cx + 200.0 * n, cy + 40.0 * (n % 3))
 
     def set_node_enabled(self, node_id: str, on: bool) -> None:
         """Enable/disable a node and re-render to reflect the visual state."""
