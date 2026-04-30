@@ -2,5 +2,9 @@ name: eggseis demo
 surveys:
   - name: demo
     path: ../../demo.mdio
+  - name: wedge
+    path: wedge.mdio
+  - name: checkerboard
+    path: checkerboard.mdio
 horizons: []
 wells: []
