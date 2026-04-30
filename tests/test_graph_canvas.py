@@ -236,14 +236,26 @@ def test_delete_action_removes_node_from_graph(canvas, linear_attr, qtbot):
     assert all(node_id not in (e.src_node_id, e.dst_node_id) for e in g.edges)
 
 
-def test_source_node_locked_against_deletion(canvas, qtbot):
-    """Source node must be unselectable so Delete-key can't remove it."""
+def test_source_node_auto_deselects(canvas, qtbot):
+    """Selecting Source must force-deselect it so Delete-key can't target it."""
     g = Graph()
     canvas.bind(g)
     src = canvas._source_scene_node
     src.graphics_object.setSelected(True)
-    # Lock prevents selection — verify it stuck.
+    # Selection-changed handler forces it back off.
     assert src.graphics_object.isSelected() is False
+
+
+def test_delete_selected_keeps_source(canvas, linear_attr, qtbot):
+    """Even if Source is somehow selected, lib's delete_selected can't remove it."""
+    g = Graph()
+    canvas.bind(g)
+    canvas.add_plugin(linear_attr)
+    canvas._scene.clearSelection()
+    canvas._source_scene_node.graphics_object.setSelected(True)
+    canvas._view.delete_selected()
+    assert canvas._source_scene_node is not None
+    assert canvas.has_source_node()
 
 
 def test_canvas_does_not_tap_on_double_click(canvas, linear_attr, qtbot):
