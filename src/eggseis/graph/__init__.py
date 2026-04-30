@@ -6,6 +6,7 @@ collection of `Node`s connected via named-port `Edge`s. The implicit
 ports: `inline`, `xline`, `timeslice`.
 """
 
+from eggseis.graph.executor import GraphExecutor
 from eggseis.graph.model import (
     SOURCE_ID,
     SOURCE_PORTS,
@@ -22,6 +23,7 @@ __all__ = [
     "CycleError",
     "Edge",
     "Graph",
+    "GraphExecutor",
     "Node",
     "OrphanPluginError",
 ]
