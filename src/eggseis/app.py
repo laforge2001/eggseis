@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QSplitter,
 )
@@ -106,6 +107,7 @@ class MainWindow(QMainWindow):
                          self._graph_param_dock.show_node(nid))
         )
         self._canvas.nodeRemoved.connect(lambda _nid: self._graph_param_dock.refresh())
+        self._canvas._scene.node_context_menu.connect(self._on_node_context_menu)
 
         self._build_menus()
         self._wire_signals()
@@ -370,6 +372,40 @@ class MainWindow(QMainWindow):
         node_id = self._canvas.add_plugin(spec)
         self._canvas.set_tap(node_id, "out")
         return node_id
+
+    def _on_node_context_menu(self, scene_node, _scene_pos, screen_pos) -> None:
+        node_id = self._canvas._scene_node_to_graph_id(scene_node)
+        if node_id is None or node_id == SOURCE_ID:
+            return
+        graph = self._graphs[self._active_survey_id]
+        node = graph.nodes[node_id]
+        is_multi_input = len(node.spec.inputs) > 1
+
+        menu = QMenu(self)
+        if is_multi_input:
+            action_disable = QAction("Disable (multi-input not allowed)", self)
+            action_disable.setEnabled(False)
+            menu.addAction(action_disable)
+        else:
+            label = "Enable" if not node.enabled else "Disable"
+            action_toggle = QAction(label, self)
+            action_toggle.triggered.connect(
+                lambda _checked, nid=node_id, on=not node.enabled:
+                    self._canvas.set_node_enabled(nid, on)
+            )
+            menu.addAction(action_toggle)
+        action_tap = QAction("Tap output", self)
+        action_tap.triggered.connect(
+            lambda _checked, nid=node_id: self._canvas.set_tap(nid, "out")
+        )
+        menu.addAction(action_tap)
+        menu.addSeparator()
+        action_remove = QAction("Remove node", self)
+        action_remove.triggered.connect(
+            lambda _checked, nid=node_id: self._canvas.remove_node(nid)
+        )
+        menu.addAction(action_remove)
+        menu.exec_(screen_pos)
 
     def _on_add_node_to_graph(self) -> None:
         if self._active_survey_id is None:

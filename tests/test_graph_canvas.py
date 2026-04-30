@@ -220,6 +220,31 @@ def test_double_click_node_taps_output(canvas, linear_attr, qtbot):
     assert g.tap_port == (node_id, "out")
 
 
+def test_set_node_enabled_toggles_graph_and_opacity(canvas, linear_attr):
+    g = Graph()
+    canvas.bind(g)
+    node_id = canvas.add_plugin(linear_attr)
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", node_id, "traces"))
+
+    canvas.set_node_enabled(node_id, False)
+    assert g.nodes[node_id].enabled is False
+    assert canvas.scene_node_for(node_id).graphics_object.opacity() < 0.5
+
+    canvas.set_node_enabled(node_id, True)
+    assert g.nodes[node_id].enabled is True
+    assert canvas.scene_node_for(node_id).graphics_object.opacity() == 1.0
+
+
+def test_set_node_enabled_rejects_multi_input(canvas, subtract_attr):
+    g = Graph()
+    canvas.bind(g)
+    node_id = canvas.add_plugin(subtract_attr)
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", node_id, "a"))
+    canvas.connect_edge(Edge(SOURCE_ID, "inline", node_id, "b"))
+    with pytest.raises(ValueError, match="multi-input"):
+        canvas.set_node_enabled(node_id, False)
+
+
 def test_position_round_trips_through_bind(canvas, linear_attr):
     g = Graph()
     canvas.bind(g)

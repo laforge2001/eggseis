@@ -170,6 +170,17 @@ class GraphCanvas(QWidget):
         # Cascade right and down so successive adds don't overlap.
         return (cx + 30.0 * (n % 4), cy + 60.0 * n)
 
+    def set_node_enabled(self, node_id: str, on: bool) -> None:
+        """Enable/disable a node and re-render to reflect the visual state."""
+        if self._graph is None or node_id == SOURCE_ID:
+            return
+        self._graph.set_enabled(node_id, on)
+        scene_node = self._scene_nodes.get(node_id)
+        if scene_node is not None:
+            # Visual cue — dim the node's opacity so disabled state is obvious.
+            scene_node.graphics_object.setOpacity(1.0 if on else 0.4)
+        self.edgeChanged.emit()
+
     def remove_node(self, node_id: str) -> None:
         if self._graph is None:
             return
