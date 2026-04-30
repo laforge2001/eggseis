@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressDialog,
     QSplitter,
 )
 
@@ -147,6 +148,10 @@ class MainWindow(QMainWindow):
         a_add_node = QAction("&Add Plugin to Graph…", self)
         a_add_node.triggered.connect(self._on_add_node_to_graph)
         m_graph.addAction(a_add_node)
+        m_graph.addSeparator()
+        a_export = QAction("&Export Volume with Graph Applied…", self)
+        a_export.triggered.connect(self._on_export_volume)
+        m_graph.addAction(a_export)
 
         m_attr = self.menuBar().addMenu("&Attribute")
         self._attr_group = QActionGroup(self)
@@ -433,6 +438,47 @@ class MainWindow(QMainWindow):
         )
         menu.addAction(action_remove)
         menu.exec_(screen_pos)
+
+    def _on_export_volume(self) -> None:
+        from eggseis.graph.runner import export_volume_with_graph
+
+        if self._active_survey_id is None:
+            self.statusBar().showMessage("Open a survey first.", 3000)
+            return
+        out_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Volume", "", "MDIO (*.mdio);;All files (*)"
+        )
+        if not out_path:
+            return
+        graph = self._graphs[self._active_survey_id]
+        volume = self.section_viewer.volume
+        n_il = volume.geometry.n_inlines
+
+        progress = QProgressDialog(
+            "Exporting volume with graph applied…", "Cancel", 0, n_il, self
+        )
+        progress.setWindowTitle("Export")
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        cancelled = {"v": False}
+
+        def on_progress(done: int, total: int) -> None:
+            progress.setValue(done)
+            if progress.wasCanceled():
+                cancelled["v"] = True
+                raise InterruptedError("export cancelled by user")
+
+        try:
+            export_volume_with_graph(graph, volume, out_path, on_progress=on_progress)
+        except InterruptedError:
+            self.statusBar().showMessage("Export cancelled.", 3000)
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, "Export failed", repr(exc))
+            return
+        progress.setValue(n_il)
+        self.statusBar().showMessage(f"Wrote {out_path}", 5000)
 
     def _on_add_node_to_graph(self) -> None:
         if self._active_survey_id is None:
