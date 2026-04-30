@@ -1,0 +1,127 @@
+"""Pipeline + Node data model.
+
+A Pipeline is a linear sequence of plugin Nodes plus an implicit Source at
+position 0. The user picks a tap (a node id, or `SOURCE_ID`); execution
+walks Source → tap and the section viewer paints the tap's output.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
+from dataclasses import dataclass, field
+
+from pydantic import BaseModel
+
+from eggseis.compute.cache import params_hash
+from eggseis.plugin import PluginSpec
+
+SOURCE_ID = "source"
+
+
+@dataclass
+class Node:
+    spec: PluginSpec
+    params: BaseModel
+    enabled: bool = True
+    node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
+@dataclass
+class Pipeline:
+    nodes: list[Node] = field(default_factory=list)
+    tap_node_id: str = SOURCE_ID
+
+    def _index(self, node_id: str) -> int:
+        for i, n in enumerate(self.nodes):
+            if n.node_id == node_id:
+                return i
+        raise KeyError(node_id)
+
+    def append(self, node: Node) -> None:
+        self.nodes.append(node)
+
+    def remove(self, node_id: str) -> None:
+        del self.nodes[self._index(node_id)]
+        if self.tap_node_id == node_id:
+            self.tap_node_id = SOURCE_ID
+
+    def move(self, node_id: str, new_index: int) -> None:
+        """Reposition a node to `new_index`.
+
+        Out-of-bounds indices follow ``list.insert`` semantics (clamped/appended).
+        """
+        i = self._index(node_id)
+        node = self.nodes.pop(i)
+        self.nodes.insert(new_index, node)
+
+    def set_enabled(self, node_id: str, on: bool) -> None:
+        self.nodes[self._index(node_id)].enabled = on
+        if not on and self.tap_node_id == node_id:
+            self.set_tap(node_id)  # set_tap handles the upstream shift
+
+    def set_params(self, node_id: str, params: BaseModel) -> None:
+        self.nodes[self._index(node_id)].params = params
+
+    def set_tap(self, node_id: str) -> None:
+        if node_id == SOURCE_ID:
+            self.tap_node_id = SOURCE_ID
+            return
+        idx = self._index(node_id)
+        target = self.nodes[idx]
+        if target.enabled:
+            self.tap_node_id = node_id
+            return
+        for i in range(idx - 1, -1, -1):
+            if self.nodes[i].enabled:
+                self.tap_node_id = self.nodes[i].node_id
+                return
+        self.tap_node_id = SOURCE_ID
+
+    def nodes_up_to_tap(self) -> list[Node]:
+        """Enabled nodes from index 0 through the tap, inclusive.
+
+        If the tap is SOURCE_ID, returns []. Disabled nodes are filtered.
+        """
+        if self.tap_node_id == SOURCE_ID:
+            return []
+        tap_idx = self._index(self.tap_node_id)
+        return [n for n in self.nodes[: tap_idx + 1] if n.enabled]
+
+    def chain_hash_for(self, node_id: str, volume_version: tuple) -> str:
+        """Cache-key hash for the chain ending at `node_id`.
+
+        Source hash: blake2b of canonical-JSON volume_version tuple.
+        Each enabled node folds in (plugin_id, plugin_version, params_hash,
+        parent_hash). Disabled nodes act as identity (parent passes through).
+        """
+        source_blob = json.dumps(
+            list(volume_version), separators=(",", ":")
+        ).encode()
+        running = hashlib.blake2b(source_blob, digest_size=16).hexdigest()
+        if node_id == SOURCE_ID:
+            return running
+
+        tap_idx = self._index(node_id)
+        for node in self.nodes[: tap_idx + 1]:
+            if not node.enabled:
+                continue
+            payload = (
+                node.spec.id,
+                node.spec.version,
+                params_hash(node.params.model_dump()),
+                running,
+            )
+            blob = json.dumps(
+                list(payload), separators=(",", ":")
+            ).encode()
+            running = hashlib.blake2b(blob, digest_size=16).hexdigest()
+        return running
+
+    def deterministic_through(self, node_id: str) -> bool:
+        """True iff every enabled node 0..node_id is deterministic. SOURCE_ID always True."""
+        if node_id == SOURCE_ID:
+            return True
+        tap_idx = self._index(node_id)
+        return all(n.spec.deterministic for n in self.nodes[: tap_idx + 1] if n.enabled)

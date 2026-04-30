@@ -314,3 +314,104 @@ def test_cache_hit_cancels_in_flight_job(qtbot, fake_backend, very_slow_spec):
 
     assert first_token.cancelled is True
     assert orch._active is None
+
+
+def test_request_uses_input_section_override(qtbot, fake_backend, linear_spec):
+    """When input_section is provided, orchestrator skips volume reads."""
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+
+    raw_shape = volume.read_inline(volume.geometry.inline_min).shape
+    canned = np.full(raw_shape, 7.0, dtype=np.float32)
+    params = linear_spec.param_model(scale=2.0)
+
+    with qtbot.waitSignal(orch.sectionReady, timeout=2000) as blocker:
+        orch.request(
+            linear_spec, params, volume, "inline", volume.geometry.inline_min,
+            input_section=canned, chain_hash="abc123",
+        )
+    _job_id, arr = blocker.args
+    np.testing.assert_allclose(arr, canned * 2.0)
+
+
+def test_request_uses_chain_hash_override_for_cache_key(qtbot, fake_backend, linear_spec):
+    """Identical chain_hash on second request hits cache; raw input_section ignored."""
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    assert linear_spec.deterministic, "cache-hit path requires deterministic=True"
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    raw_shape = volume.read_inline(volume.geometry.inline_min).shape
+    section_a = np.full(raw_shape, 1.0, dtype=np.float32)
+    params = linear_spec.param_model(scale=3.0)
+
+    with qtbot.waitSignal(orch.sectionReady, timeout=2000):
+        orch.request(
+            linear_spec, params, volume, "inline", volume.geometry.inline_min,
+            input_section=section_a, chain_hash="zzz999",
+        )
+
+    # Second request, same chain_hash, different input_section → cache hit returns
+    # the previous (section_a * 3.0) result, not section_b * 3.0.
+    section_b = np.full(raw_shape, 100.0, dtype=np.float32)
+    with qtbot.waitSignal(orch.sectionReady, timeout=2000) as blocker:
+        orch.request(
+            linear_spec, params, volume, "inline", volume.geometry.inline_min,
+            input_section=section_b, chain_hash="zzz999",
+        )
+    _job_id, arr = blocker.args
+    np.testing.assert_allclose(arr, section_a * 3.0)
+
+
+def test_timeslice_with_input_section_uses_override(qtbot, fake_backend, linear_spec):
+    """Defensive guard: if a caller passes input_section + axis=timeslice,
+    use the override rather than reading from the volume."""
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    raw_shape = volume.read_timeslice(0).shape
+    canned = np.full(raw_shape, 9.0, dtype=np.float32)
+    params = linear_spec.param_model(scale=2.0)
+
+    with qtbot.waitSignal(orch.sectionReady, timeout=2000) as blocker:
+        orch.request(
+            linear_spec, params, volume, "timeslice", 0,
+            input_section=canned,
+        )
+    _job_id, arr = blocker.args
+    # Timeslice still bypasses the chain (raw paint), but uses the supplied
+    # array instead of re-reading from the volume.
+    np.testing.assert_array_equal(arr, canned)
+
+
+def test_input_section_is_copied_defensively(qtbot, fake_backend, linear_spec):
+    """Mutating the caller's array after request() must not affect the
+    dispatched compute."""
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    raw_shape = volume.read_inline(volume.geometry.inline_min).shape
+    canned = np.full(raw_shape, 1.0, dtype=np.float32)
+    params = linear_spec.param_model(scale=5.0)
+
+    orch.request(
+        linear_spec, params, volume, "inline", volume.geometry.inline_min,
+        input_section=canned, chain_hash="copytest",
+    )
+    # Mutate immediately, before debounce fires.
+    canned[:] = 999.0
+
+    blocker = qtbot.waitSignal(orch.sectionReady, timeout=2000)
+    blocker.wait()
+    _job_id, arr = blocker.args
+    # Result is 1.0 * 5.0 = 5.0, not 999.0 * 5.0.
+    np.testing.assert_allclose(arr, np.full(raw_shape, 5.0, dtype=np.float32))

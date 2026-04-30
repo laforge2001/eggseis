@@ -24,7 +24,7 @@ def _key(i: int) -> CacheKey:
     return CacheKey(
         plugin_id="p",
         plugin_version="0.1.0",
-        params_hash="h",
+        chain_hash="h",
         axis="inline",
         index=i,
         volume_version=("mdio", "/x", 1, 1),
@@ -76,3 +76,27 @@ def test_lru_drops_silently_when_value_exceeds_budget():
     cache.put(_key(0), big)
     assert len(cache) == 0
     assert cache.nbytes == 0
+
+
+def test_make_cache_key_uses_chain_hash_override_when_provided(fake_backend):
+    from eggseis.compute.cache import make_cache_key, params_hash
+    from eggseis.data import SeismicVolume
+
+    class _StubSpec:
+        id = "p"
+        version = "0.1.0"
+
+    class _StubParams:
+        def model_dump(self):
+            return {"a": 1}
+
+    volume = SeismicVolume(fake_backend, name="v")
+    key = make_cache_key(
+        _StubSpec(), _StubParams(), volume, "inline", 0, chain_hash="deadbeef"
+    )
+    assert key.chain_hash == "deadbeef"
+
+    # Default path: no chain_hash kwarg → uses params_hash(model_dump()).
+    key_default = make_cache_key(_StubSpec(), _StubParams(), volume, "inline", 0)
+    expected = params_hash({"a": 1})
+    assert key_default.chain_hash == expected

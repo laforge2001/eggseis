@@ -121,3 +121,46 @@ def demo_project_path(tmp_path_factory, sample_mdio_path) -> Path:
         "wells: []\n"
     )
     return root
+
+
+@pytest.fixture
+def linear_spec():
+    """Deterministic trace * scalar. Vectorized batch path supported."""
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="Linear Scale", version="0.1.0", vectorized=True, deterministic=True)
+    def linear(traces: np.ndarray, scale: float = Param(default=1.0)) -> np.ndarray:
+        return traces * scale
+
+    yield linear._eggseis_spec
+    clear_registry()
+
+
+@pytest.fixture
+def make_pipeline():
+    """Build a Pipeline from a list of (spec, params) tuples or bare specs."""
+    def _make(*specs_and_params):
+        from eggseis.pipeline.model import Node, Pipeline
+        p = Pipeline()
+        for entry in specs_and_params:
+            if isinstance(entry, tuple):
+                spec, params = entry
+            else:
+                spec = entry
+                params = spec.param_model()
+            p.append(Node(spec=spec, params=params))
+        return p
+    return _make
+
+
+@pytest.fixture
+def param_dock_factory():
+    """Factory that builds a ParamDock per Node, seeded from the node's params."""
+    def _factory(node):
+        from eggseis.widgets.param_dock import ParamDock
+        widget = ParamDock()
+        widget.set_plugin(node.spec, params=node.params)
+        return widget
+    return _factory

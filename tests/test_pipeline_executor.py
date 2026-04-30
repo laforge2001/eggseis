@@ -1,0 +1,350 @@
+"""PipelineExecutor tests — qtbot-driven; require pytest-qt."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from eggseis.pipeline.model import Node, Pipeline
+
+
+def _make_lin_spec():
+    """Inline 'linear scale' plugin for tests that need to mix specs in one registry."""
+    from eggseis.plugin import Param, trace_attribute
+
+    @trace_attribute(name="lin", version="0.1.0", deterministic=True, vectorized=True)
+    def lin(traces, scale: float = Param(default=1.0)):
+        return traces * scale
+
+    return lin._eggseis_spec
+
+
+def test_empty_pipeline_taps_source_emits_raw(qtbot, fake_backend):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+    p = Pipeline()  # tap defaults to SOURCE_ID
+
+    with qtbot.waitSignal(exe.tapReady, timeout=2000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    np.testing.assert_array_equal(arr, volume.read_inline(volume.geometry.inline_min))
+
+
+def test_single_node_cold_execution(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline((linear_spec, linear_spec.param_model(scale=2.0)))
+    p.set_tap(p.nodes[0].node_id)
+
+    with qtbot.waitSignal(exe.tapReady, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    np.testing.assert_allclose(
+        arr,
+        volume.read_inline(volume.geometry.inline_min) * 2.0,
+        rtol=1e-5,
+    )
+
+
+def test_three_node_chain_executes_serially(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(
+        (linear_spec, linear_spec.param_model(scale=2.0)),
+        (linear_spec, linear_spec.param_model(scale=3.0)),
+        (linear_spec, linear_spec.param_model(scale=5.0)),
+    )
+    p.set_tap(p.nodes[-1].node_id)
+
+    with qtbot.waitSignal(exe.tapReady, timeout=10_000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    expected = volume.read_inline(volume.geometry.inline_min) * 30.0
+    np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+
+def test_warm_tap_returns_cached_output(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(
+        (linear_spec, linear_spec.param_model(scale=2.0)),
+        (linear_spec, linear_spec.param_model(scale=3.0)),
+    )
+    p.set_tap(p.nodes[-1].node_id)
+
+    # Warm.
+    with qtbot.waitSignal(exe.tapReady, timeout=5000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    # Second request: should hit cache. Tight timeout — generous for CI but
+    # tight enough that a re-compute would miss it.
+    with qtbot.waitSignal(exe.tapReady, timeout=200) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    expected = volume.read_inline(volume.geometry.inline_min) * 6.0
+    np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+
+def test_param_edit_on_middle_node_invalidates_only_downstream(
+    qtbot, fake_backend, linear_spec, make_pipeline
+):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(
+        (linear_spec, linear_spec.param_model(scale=2.0)),
+        (linear_spec, linear_spec.param_model(scale=3.0)),
+        (linear_spec, linear_spec.param_model(scale=5.0)),
+    )
+    p.set_tap(p.nodes[-1].node_id)
+
+    # Warm whole chain.
+    with qtbot.waitSignal(exe.tapReady, timeout=5000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    cache_size_after_warm = len(orch.cache)
+    assert cache_size_after_warm == 3  # 3 entries: node 1, 2, 3
+
+    # Edit middle node param.
+    p.set_params(p.nodes[1].node_id, linear_spec.param_model(scale=7.0))
+
+    with qtbot.waitSignal(exe.tapReady, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    expected = volume.read_inline(volume.geometry.inline_min) * 2.0 * 7.0 * 5.0
+    np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+    # Cache now has 5 entries: node 1 (unchanged), old node 2/3, new node 2/3.
+    assert len(orch.cache) == 5
+
+
+def test_disabled_middle_node_is_skipped_in_chain(
+    qtbot, fake_backend, linear_spec, make_pipeline
+):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(
+        (linear_spec, linear_spec.param_model(scale=2.0)),
+        (linear_spec, linear_spec.param_model(scale=99.0)),
+        (linear_spec, linear_spec.param_model(scale=3.0)),
+    )
+    p.set_tap(p.nodes[-1].node_id)
+    p.set_enabled(p.nodes[1].node_id, False)
+
+    with qtbot.waitSignal(exe.tapReady, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    expected = volume.read_inline(volume.geometry.inline_min) * 6.0  # 2.0 * 3.0
+    np.testing.assert_allclose(arr, expected, rtol=1e-5)
+
+
+def test_plugin_failure_halts_plan_and_emits_failed(qtbot, fake_backend):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+    lin_spec = _make_lin_spec()
+
+    @trace_attribute(name="boom", version="0.1.0", deterministic=True, vectorized=False)
+    def boom(trace, dummy: float = Param(default=0.0)):
+        raise RuntimeError("intentional")
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=lin_spec, params=lin_spec.param_model(scale=2.0)))
+    p.append(Node(spec=boom._eggseis_spec, params=boom._eggseis_spec.param_model()))
+    p.set_tap(p.nodes[-1].node_id)
+
+    with qtbot.waitSignal(exe.failed, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, message = blocker.args
+    assert "boom" in message  # plugin name appears in surfaced error
+
+    clear_registry()
+
+
+def test_non_deterministic_node_skips_cache_writes_downstream(qtbot, fake_backend):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+    lin_spec = _make_lin_spec()
+
+    @trace_attribute(name="passthrough", version="0.1.0", deterministic=False, vectorized=True)
+    def passthrough(traces, dummy: float = Param(default=1.0)):
+        return traces
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=lin_spec, params=lin_spec.param_model(scale=2.0)))
+    p.append(Node(spec=passthrough._eggseis_spec, params=passthrough._eggseis_spec.param_model()))
+    p.append(Node(spec=lin_spec, params=lin_spec.param_model(scale=3.0)))
+    p.set_tap(p.nodes[-1].node_id)
+
+    with qtbot.waitSignal(exe.tapReady, timeout=5000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    # Cache holds only the deterministic prefix (node 1).
+    assert len(orch.cache) == 1
+
+    clear_registry()
+
+
+def test_timeslice_axis_short_circuits_to_raw(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline((linear_spec, linear_spec.param_model(scale=99.0)))
+    p.set_tap(p.nodes[0].node_id)
+
+    with qtbot.waitSignal(exe.tapReady, timeout=2000) as blocker:
+        exe.request_tap(p, volume, "timeslice", 0)
+    _job_id, arr = blocker.args
+    np.testing.assert_array_equal(arr, volume.read_timeslice(0))
+
+
+def test_new_request_supersedes_in_flight(qtbot, fake_backend):
+    """Sleep-per-trace plugin so we can race two requests."""
+    import time
+
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+    from eggseis.plugin import Param, clear_registry, trace_attribute
+
+    clear_registry()
+
+    @trace_attribute(name="slow", version="0.1.0", deterministic=True, vectorized=False)
+    def slow(trace, scale: float = Param(default=1.0)):
+        time.sleep(0.005)  # 5 ms per trace
+        return trace * scale
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=slow._eggseis_spec, params=slow._eggseis_spec.param_model(scale=2.0)))
+    p.set_tap(p.nodes[0].node_id)
+
+    # Kick off the slow request. Don't wait.
+    exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    # Immediately supersede with a different param value.
+    p.set_params(p.nodes[0].node_id, slow._eggseis_spec.param_model(scale=4.0))
+    with qtbot.waitSignal(exe.tapReady, timeout=10_000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+
+    np.testing.assert_allclose(
+        arr, volume.read_inline(volume.geometry.inline_min) * 4.0, rtol=1e-5
+    )
+    clear_registry()
+
+
+def test_progress_signal_fires_per_node(qtbot, fake_backend, linear_spec, make_pipeline):
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = make_pipeline(linear_spec, linear_spec, linear_spec)
+    p.set_tap(p.nodes[-1].node_id)
+
+    seen: list[tuple[int, int, str]] = []
+    exe.progress.connect(lambda *args: seen.append(args))
+
+    with qtbot.waitSignal(exe.tapReady, timeout=10_000):
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+
+    assert len(seen) == 3
+    assert [s[0] for s in seen] == [1, 2, 3]
+    assert all(s[1] == 3 for s in seen)
+
+
+def test_orphan_node_after_plugin_removed_runs_via_held_spec_reference(qtbot, fake_backend):
+    """Plugin reload mid-session: clearing the registry must not corrupt
+    in-flight pipelines. Nodes hold direct PluginSpec references, so the
+    executor still produces correct output."""
+    from eggseis.compute.orchestrator import JobOrchestrator
+    from eggseis.data import SeismicVolume
+    from eggseis.pipeline.executor import PipelineExecutor
+
+    # Build a chain whose spec we then orphan from the registry.
+    lin_spec = _make_lin_spec()
+    node_params = lin_spec.param_model(scale=2.0)
+
+    volume = SeismicVolume(fake_backend, name="v")
+    orch = JobOrchestrator()
+    exe = PipelineExecutor(orch)
+
+    p = Pipeline()
+    p.append(Node(spec=lin_spec, params=node_params))
+    p.set_tap(p.nodes[0].node_id)
+
+    # Simulate "Reload Plugins": clear_registry() removes the global mapping,
+    # but the Node retains its direct spec reference.
+    from eggseis.plugin import clear_registry, registered
+    clear_registry()
+    assert registered() == ()  # registry is empty post-clear
+    assert lin_spec is p.nodes[0].spec  # but the Node still holds the spec
+
+    # Executor runs successfully against the orphaned spec.
+    with qtbot.waitSignal(exe.tapReady, timeout=5000) as blocker:
+        exe.request_tap(p, volume, "inline", volume.geometry.inline_min)
+    _job_id, arr = blocker.args
+    np.testing.assert_allclose(
+        arr,
+        volume.read_inline(volume.geometry.inline_min) * 2.0,
+        rtol=1e-5,
+    )

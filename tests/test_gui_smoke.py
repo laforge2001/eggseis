@@ -281,3 +281,31 @@ def test_slice_change_preserves_active_params(qtbot, demo_project_path):
         win._on_slice_changed(win.section_viewer.current_axis, new_index)
     # _active_params is unchanged after the slice change
     assert win._active_params is snapshot
+
+
+def test_chain_three_attributes_tap_each(qtbot, demo_project_path):
+    from eggseis.builtins.envelope import envelope
+    from eggseis.builtins.ormsby_bandpass import ormsby_bandpass
+    from eggseis.builtins.rms_amplitude import rms_amplitude
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    survey_item = _find_first_survey_item(win.tree)
+    win.tree.itemDoubleClicked.emit(survey_item, 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    dock = win._pipeline_dock
+    for spec_func in (ormsby_bandpass, envelope, rms_amplitude):
+        spec = spec_func._eggseis_spec
+        with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
+            dock.add_plugin(spec)
+
+    pipeline = win._pipelines[win._active_survey_id]
+    assert len(pipeline.nodes) == 3
+
+    for node in pipeline.nodes:
+        with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
+            dock.row_widget(node.node_id).tap_radio.setChecked(True)
+        assert win.section_viewer.has_overlay

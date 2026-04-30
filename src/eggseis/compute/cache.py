@@ -18,7 +18,9 @@ def params_hash(params_dump: dict[str, Any]) -> str:
     """Stable 16-byte hex digest of a parameter dict.
 
     Canonical-JSON encoding (sorted keys, no whitespace) means two equal dicts
-    always hash the same regardless of insertion order.
+    always hash the same regardless of insertion order.  For single-node
+    (non-chained) callers, this digest is the value stored in
+    `CacheKey.chain_hash`.
     """
     blob = json.dumps(params_dump, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.blake2b(blob, digest_size=16).hexdigest()
@@ -28,24 +30,28 @@ def params_hash(params_dump: dict[str, Any]) -> str:
 class CacheKey:
     plugin_id: str
     plugin_version: str
-    params_hash: str
+    chain_hash: str
     axis: str
     index: int
     volume_version: tuple
 
 
-def make_cache_key(spec, params, volume, axis, index) -> CacheKey:
+def make_cache_key(spec, params, volume, axis, index, *, chain_hash: str | None = None) -> CacheKey:
     """Build a `CacheKey` for a `(spec, params, volume, axis, index)` tuple.
 
     Single source of truth shared by `JobOrchestrator` and tests so the
     canonical layout never drifts. `axis` may be an `Axis` enum or its
     `.value` string.
+
+    Pass an explicit `chain_hash` when the caller has already folded upstream
+    cache keys and params into a combined digest (e.g. `PipelineExecutor`).
+    Omit it for single-node callers; the hash is derived from `params` alone.
     """
     axis_value = axis.value if hasattr(axis, "value") else axis
     return CacheKey(
         plugin_id=spec.id,
         plugin_version=spec.version,
-        params_hash=params_hash(params.model_dump()),
+        chain_hash=chain_hash if chain_hash is not None else params_hash(params.model_dump()),
         axis=axis_value,
         index=index,
         volume_version=volume.version,

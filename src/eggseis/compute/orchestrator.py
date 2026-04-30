@@ -76,6 +76,10 @@ class JobOrchestrator(QObject):
         volume: SeismicVolume,
         axis: Axis | str,
         index: int,
+        *,
+        input_section: np.ndarray | None = None,
+        chain_hash: str | None = None,
+        skip_cache_write: bool = False,
     ) -> None:
         axis_enum = Axis(axis)
         self._pending = {
@@ -84,16 +88,21 @@ class JobOrchestrator(QObject):
             "volume": volume,
             "axis": axis_enum,
             "index": index,
+            "input_section": None if input_section is None else input_section.copy(),
+            "chain_hash": chain_hash,
+            "skip_cache_write": skip_cache_write,
         }
-        # Cache-hit fast path: skip debounce.
-        key = make_cache_key(spec, params, volume, axis_enum, index)
+        key = make_cache_key(spec, params, volume, axis_enum, index, chain_hash=chain_hash)
         self._pending["key"] = key
+        # Cache reads use spec.deterministic alone; chain-poisoned entries
+        # were never written, so a miss is the only possible outcome.
+        # Cache-hit fast path: skip debounce, cancel any in-flight job
+        # (a late tilesReady/sectionReady would clobber this synchronous
+        # paint), and emit immediately.
         if spec.deterministic:
             cached = self._cache.get(key)
             if cached is not None:
                 self._pending = None
-                # Cancel any in-flight job; a late tilesReady/sectionReady
-                # from it would clobber this synchronous paint.
                 self.cancel_active()
                 self.sectionReady.emit(Job().id, cached)
                 return
@@ -119,13 +128,17 @@ class JobOrchestrator(QObject):
         index: int = req["index"]
 
         if axis is Axis.TIMESLICE:
-            # Trace-local attributes don't apply; surface raw and stop.
-            self.sectionReady.emit(Job().id, volume.read_timeslice(index))
+            override = req["input_section"]
+            ts = override if override is not None else volume.read_timeslice(index)
+            self.sectionReady.emit(Job().id, ts)
             return
 
-        section = (
-            volume.read_inline(index) if axis is Axis.INLINE else volume.read_xline(index)
-        )
+        if req["input_section"] is not None:
+            section = req["input_section"]
+        else:
+            section = (
+                volume.read_inline(index) if axis is Axis.INLINE else volume.read_xline(index)
+            )
 
         if self._active is not None:
             self._active.token.cancel()
@@ -140,6 +153,7 @@ class JobOrchestrator(QObject):
             output=np.empty_like(section, dtype=np.float32),
             context=make_trace_context(volume, axis, index),
             cache_key=req.get("key"),
+            skip_cache_write=req.get("skip_cache_write", False),
         )
         self._active = job
         tiles = split_section(section.shape[0], TILE_SIZE)
@@ -163,7 +177,7 @@ class JobOrchestrator(QObject):
         if self._delivered_ranges:
             self.tilesReady.emit(job.id, job.output, list(self._delivered_ranges))
             self._delivered_ranges.clear()
-        if job.spec.deterministic:
+        if job.spec.deterministic and not job.skip_cache_write:
             self._cache.put(job.cache_key, job.output)
         self.sectionReady.emit(job.id, job.output)
         self._active = None
