@@ -68,7 +68,7 @@ def test_main_window_menus(qtbot):
 
     bar = win.menuBar()
     titles = [a.text().replace("&", "") for a in bar.actions()]
-    assert titles == ["File", "View", "Attribute", "Help"]
+    assert titles == ["File", "View", "Graph", "Attribute", "Help"]
     _ = Qt
 
 
@@ -313,6 +313,33 @@ def test_graph_chain_three_attributes_tap_each(qtbot, demo_project_path):
         with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
             canvas.set_tap(node_id, "out")
         assert win.section_viewer.has_overlay
+
+
+def test_graph_menu_adds_node_to_canvas(qtbot, demo_project_path):
+    from eggseis.builtins.envelope import envelope
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Empty graph initially.
+    g = win._graphs[win._active_survey_id]
+    assert len(g.nodes) == 0
+
+    win.add_plugin_to_graph(envelope._eggseis_spec)
+    assert len(g.nodes) == 1
+    only = next(iter(g.nodes.values()))
+    assert only.spec.id == envelope._eggseis_spec.id
+
+
+def test_graph_menu_action_exists(qtbot):
+    win = MainWindow()
+    qtbot.addWidget(win)
+    actions = {a.text().replace("&", ""): a for a in win.menuBar().actions()}
+    assert "Graph" in actions, f"expected Graph menu, got {list(actions)}"
 
 
 def test_graph_subtract_tap_ready(qtbot, demo_project_path):

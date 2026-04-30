@@ -131,6 +131,11 @@ class MainWindow(QMainWindow):
         self._lock_levels_action.toggled.connect(self.section_viewer.set_levels_locked)
         m_view.addAction(self._lock_levels_action)
 
+        m_graph = self.menuBar().addMenu("&Graph")
+        a_add_node = QAction("&Add Plugin to Graph…", self)
+        a_add_node.triggered.connect(self._on_add_node_to_graph)
+        m_graph.addAction(a_add_node)
+
         m_attr = self.menuBar().addMenu("&Attribute")
         self._attr_group = QActionGroup(self)
         self._attr_group.setExclusive(True)
@@ -343,6 +348,31 @@ class MainWindow(QMainWindow):
             f"&Compute Errors… ({len(self._compute_errors)})"
         )
         self.statusBar().showMessage(f"{name} failed: {message}", 5000)
+
+    def add_plugin_to_graph(self, spec: PluginSpec) -> str | None:
+        """Add a node for `spec` to the active survey's graph + canvas.
+
+        Returns the new node_id, or None if no survey is active.
+        """
+        if self._active_survey_id is None:
+            return None
+        return self._canvas.add_plugin(spec)
+
+    def _on_add_node_to_graph(self) -> None:
+        if self._active_survey_id is None:
+            self.statusBar().showMessage("Open a survey first.", 3000)
+            return
+        specs = sorted(discover_all(), key=lambda s: s.name)
+        if not specs:
+            return
+        names = [s.name for s in specs]
+        choice, ok = QInputDialog.getItem(
+            self, "Add Plugin to Graph", "Plugin:", names, 0, False
+        )
+        if not ok:
+            return
+        spec = next(s for s in specs if s.name == choice)
+        self.add_plugin_to_graph(spec)
 
     def _on_node_params_changed(self, node_id: str, params) -> None:
         graph = (
