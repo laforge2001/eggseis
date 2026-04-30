@@ -135,7 +135,9 @@ class GraphCanvas(QWidget):
         self._scene.connection_created.connect(self._on_lib_connection_created)
         self._scene.connection_deleted.connect(self._on_lib_connection_deleted)
         self._scene.selectionChanged.connect(self._on_scene_selection_changed)
-        self._scene.node_double_clicked.connect(self._on_node_double_clicked)
+        # Note: double-click is intentionally NOT consumed here. MainWindow
+        # routes node_double_clicked to a parameters popup; tap-on-output
+        # lives on the right-click context menu instead.
 
     # --- public API ----------------------------------------------------
 
@@ -426,9 +428,3 @@ class GraphCanvas(QWidget):
                 return
         self.selectionChanged.emit("")
 
-    def _on_node_double_clicked(self, scene_node) -> None:
-        """Double-click an output port -> tap that port."""
-        graph_id = self._scene_node_to_graph_id(scene_node)
-        if graph_id is None or graph_id == SOURCE_ID:
-            return
-        self.set_tap(graph_id, "out")

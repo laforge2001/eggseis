@@ -24,7 +24,7 @@ from eggseis.data import SeismicVolume
 from eggseis.graph.canvas import GraphCanvas
 from eggseis.graph.executor import GraphExecutor
 from eggseis.graph.model import SOURCE_ID, Graph
-from eggseis.graph.param_dock import GraphParamDock
+from eggseis.graph.params_popup import NodeParamsPopup
 from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
 from eggseis.plugin_template import create_template, open_in_editor
@@ -46,28 +46,36 @@ class MainWindow(QMainWindow):
         self.tree = ProjectTreeWidget()
         self.section_viewer = SectionViewer()
         self.slice_nav = SliceNavigator()
-        self.param_dock = ParamDock()
+        self.param_dock = ParamDock()  # Legacy single-attribute param editor.
 
-        right = QSplitter(Qt.Vertical)
-        right.addWidget(self.section_viewer)
-        right.addWidget(self.slice_nav)
-        right.setStretchFactor(0, 1)
+        # Three-pane layout:
+        #   tree (far left) | section viewer + slice nav (center) | graph canvas (right)
+        viewer_pane = QSplitter(Qt.Vertical)
+        viewer_pane.addWidget(self.section_viewer)
+        viewer_pane.addWidget(self.slice_nav)
+        viewer_pane.setStretchFactor(0, 1)
+
+        self._canvas = GraphCanvas()
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.tree)
-        splitter.addWidget(right)
+        splitter.addWidget(viewer_pane)
+        splitter.addWidget(self._canvas)
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 1)
+        splitter.setSizes([220, 600, 380])
         self.setCentralWidget(splitter)
 
-        self._param_dock_widget = QDockWidget("Parameters", self)
+        # Legacy Attribute-menu param dock kept around for the menu-driven
+        # path but hidden by default. Floats if the user enables it.
+        self._param_dock_widget = QDockWidget("Parameters (legacy)", self)
         self._param_dock_widget.setWidget(self.param_dock)
         self._param_dock_widget.setAllowedAreas(
             Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea | Qt.BottomDockWidgetArea
         )
         self.addDockWidget(Qt.RightDockWidgetArea, self._param_dock_widget)
         self.param_dock.setMinimumWidth(260)
-        # Legacy Attribute-menu param editor — hidden by default since M6's
-        # GraphParamDock supersedes it for canvas-driven workflows.
         self._param_dock_widget.setVisible(False)
 
         self._project: Project | None = None
@@ -87,26 +95,14 @@ class MainWindow(QMainWindow):
 
         self._graphs: dict[str, Graph] = {}
         self._active_survey_id: str | None = None
-        self._canvas = GraphCanvas()
-        self._canvas_dock = QDockWidget("Graph", self)
-        self._canvas_dock.setWidget(self._canvas)
-        self._canvas_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self._canvas_dock)
         self._canvas.edgeChanged.connect(self._request_tap)
         self._canvas.tapPortChanged.connect(lambda _id, _port: self._request_tap())
 
-        self._graph_param_dock = GraphParamDock(self)
-        self.addDockWidget(Qt.RightDockWidgetArea, self._graph_param_dock)
-        self._graph_param_dock.paramsChanged.connect(self._on_node_params_changed)
-        self._canvas.selectionChanged.connect(
-            lambda nid: self._graph_param_dock.show_node(nid or None)
-        )
-        # Keep the param dock in sync as the canvas grows / shrinks.
-        self._canvas.nodeAdded.connect(
-            lambda nid: (self._graph_param_dock.refresh(),
-                         self._graph_param_dock.show_node(nid))
-        )
-        self._canvas.nodeRemoved.connect(lambda _nid: self._graph_param_dock.refresh())
+        # Double-click → modeless params popup. Replaces the previous tap-on-
+        # double-click behaviour; tap stays on the right-click context menu.
+        self._params_popups: dict[str, NodeParamsPopup] = {}
+        self._canvas._scene.node_double_clicked.connect(self._on_node_double_clicked_open_params)
+        self._canvas.nodeRemoved.connect(self._close_popup_for_node)
         self._canvas._scene.node_context_menu.connect(self._on_node_context_menu)
 
         self._build_menus()
@@ -287,7 +283,10 @@ class MainWindow(QMainWindow):
         self.section_viewer.set_volume(volume)
         self.slice_nav.set_geometry(volume.geometry)
         self._canvas.bind(self._graphs[survey_id])
-        self._graph_param_dock.bind(self._graphs[survey_id])
+        # Close any params popups left over from the previous survey.
+        for popup in list(self._params_popups.values()):
+            popup.close()
+        self._params_popups.clear()
         # Only drive the executor when the graph has nodes; an empty graph
         # taps Source, which the section viewer already paints raw.
         if self._graphs[survey_id].nodes:
@@ -372,6 +371,30 @@ class MainWindow(QMainWindow):
         node_id = self._canvas.add_plugin(spec)
         self._canvas.set_tap(node_id, "out")
         return node_id
+
+    def _on_node_double_clicked_open_params(self, scene_node) -> None:
+        node_id = self._canvas._scene_node_to_graph_id(scene_node)
+        if node_id is None or node_id == SOURCE_ID:
+            return
+        graph = self._graphs[self._active_survey_id]
+        node = graph.nodes[node_id]
+
+        existing = self._params_popups.get(node_id)
+        if existing is not None and not existing.isHidden():
+            existing.raise_()
+            existing.activateWindow()
+            return
+
+        popup = NodeParamsPopup(node, parent=self)
+        popup.paramsChanged.connect(self._on_node_params_changed)
+        popup.finished.connect(lambda _result, nid=node_id: self._params_popups.pop(nid, None))
+        self._params_popups[node_id] = popup
+        popup.show()
+
+    def _close_popup_for_node(self, node_id: str) -> None:
+        popup = self._params_popups.pop(node_id, None)
+        if popup is not None:
+            popup.close()
 
     def _on_node_context_menu(self, scene_node, _scene_pos, screen_pos) -> None:
         node_id = self._canvas._scene_node_to_graph_id(scene_node)

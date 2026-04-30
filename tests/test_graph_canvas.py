@@ -206,18 +206,16 @@ def test_selection_changed_emits_graph_node_id(canvas, linear_attr, qtbot):
     assert any(r == node_id for r in received)
 
 
-def test_double_click_node_taps_output(canvas, linear_attr, qtbot):
+def test_canvas_does_not_tap_on_double_click(canvas, linear_attr, qtbot):
+    """Double-click is consumed by MainWindow for params popup, not by canvas."""
     g = Graph()
     canvas.bind(g)
     node_id = canvas.add_plugin(linear_attr)
     canvas.connect_edge(Edge(SOURCE_ID, "inline", node_id, "traces"))
-
-    received = []
-    canvas.tapPortChanged.connect(lambda nid, port: received.append((nid, port)))
-    scene_node = canvas.scene_node_for(node_id)
-    canvas._scene.node_double_clicked.emit(scene_node)
-    assert (node_id, "out") in received
-    assert g.tap_port == (node_id, "out")
+    initial_tap = g.tap_port
+    canvas._scene.node_double_clicked.emit(canvas.scene_node_for(node_id))
+    # Tap port unchanged — canvas no longer hooks node_double_clicked.
+    assert g.tap_port == initial_tap
 
 
 def test_set_node_enabled_toggles_graph_and_opacity(canvas, linear_attr):
