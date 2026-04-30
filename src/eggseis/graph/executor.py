@@ -192,6 +192,33 @@ class GraphExecutor(QObject):
             chain_hash = graph.port_hash(next_id, "out", volume.version, axis.value)
             chain_det = graph.deterministic_through(next_id, "out")
 
+            # Sink nodes run synchronously once at the section level — they
+            # side-effect (e.g. write to disk) and pass their input through
+            # without per-tile dispatch.
+            if node.spec.kind == "sink":
+                ctx = {
+                    "sample_rate_ms": volume.geometry.sample_rate_ms,
+                    "axis": axis.value,
+                    "index": index,
+                }
+                params_dump = node.params.model_dump()
+                kwargs = dict(inputs)
+                kwargs.update(params_dump)
+                if node.spec.accepts_context:
+                    kwargs["context"] = ctx
+                try:
+                    out_arr = node.spec.func(**kwargs)
+                except Exception as exc:
+                    self._active_job_id = None
+                    self.failed.emit(job_id, f"{node.spec.name}: {exc!r}")
+                    return
+                if out_arr is None:
+                    out_arr = inputs[node.spec.inputs[0]]
+                resolved[(next_id, "out")] = out_arr
+                self.intermediateReady.emit(job_id, next_id, "out", out_arr)
+                step()
+                return
+
             def on_ready(_orch_job_id: int, arr: np.ndarray) -> None:
                 if self._active_job_id != job_id:
                     return

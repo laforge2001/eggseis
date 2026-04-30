@@ -39,6 +39,7 @@ class PluginSpec:
     accepts_context: bool
     inputs: tuple[str, ...] = ("trace",)
     output: str = "out"
+    kind: str = "transform"  # "transform" | "sink" — sinks run once per section.
 
 
 _RESERVED_TRACE = ("trace", "traces", "context")
@@ -53,6 +54,7 @@ def _build_spec(
     inputs: tuple[str, ...],
     vectorized: bool,
     deterministic: bool,
+    kind: str = "transform",
 ) -> PluginSpec:
     sig = inspect.signature(func)
     fields: dict[str, tuple[type, Any]] = {}
@@ -107,6 +109,7 @@ def _build_spec(
         source_path=getattr(inspect.getmodule(func), "__file__", None),
         accepts_context=accepts_context,
         inputs=inputs,
+        kind=kind,
     )
 
 
@@ -148,6 +151,7 @@ def graph_node(
     version: str = "0.1.0",
     inputs: tuple[str, ...] = ("input",),
     deterministic: bool = True,
+    kind: str = "transform",
 ) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
     """Decorate a function as a graph-node plugin with N named input ports.
 
@@ -173,6 +177,7 @@ def graph_node(
             inputs=inputs,
             vectorized=False,
             deterministic=deterministic,
+            kind=kind,
         )
         _REGISTRY[spec.id] = spec
         func._eggseis_spec = spec  # type: ignore[attr-defined]
