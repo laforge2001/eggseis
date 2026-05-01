@@ -11,6 +11,7 @@ from eggseis.axes import Axis
 from eggseis.colormaps import get_lut
 from eggseis.data import SeismicVolume
 from eggseis.data.horizon import Horizon
+from eggseis.data.well import Well
 from eggseis.viewers.horizon_overlay import (
     inline_polyline_points,
     xline_polyline_points,
@@ -61,6 +62,7 @@ class SectionViewer(QWidget):
         # Horizon model and the pyqtgraph plot item so we can re-render
         # the polyline on every slice change without re-adding the item.
         self._horizon_overlays: dict[str, tuple[Horizon, pg.PlotDataItem]] = {}
+        self._well_overlays: dict[str, tuple[Well, pg.PlotDataItem]] = {}
 
     @property
     def current_axis(self) -> str:
@@ -137,6 +139,7 @@ class SectionViewer(QWidget):
         self._baseline_levels = None
         self._render()
         self._refresh_horizons()
+        self._refresh_wells()
 
     # --- horizon overlays --------------------------------------------------
 
@@ -154,6 +157,34 @@ class SectionViewer(QWidget):
 
     def horizon_count(self) -> int:
         return len(self._horizon_overlays)
+
+    # --- well overlays ----------------------------------------------------
+
+    def add_well_overlay(self, well: Well, *, color: str = "#3399ff") -> None:
+        item = pg.PlotDataItem(pen=pg.mkPen(color, width=2), symbol="o", symbolSize=4)
+        self._plot.addItem(item)
+        self._well_overlays[well.name] = (well, item)
+        self._refresh_wells()
+
+    def remove_well_overlay(self, name: str) -> None:
+        entry = self._well_overlays.pop(name, None)
+        if entry is not None:
+            _, item = entry
+            self._plot.removeItem(item)
+
+    def well_count(self) -> int:
+        return len(self._well_overlays)
+
+    def _refresh_wells(self) -> None:
+        if self._volume is None:
+            return
+        geom = self._volume.geometry
+        for well, item in self._well_overlays.values():
+            pts = well.intersect_section(self._axis.value, self._index, geom)
+            if pts.size:
+                item.setData(x=pts[:, 0], y=pts[:, 1])
+            else:
+                item.setData(x=[], y=[])
 
     def _refresh_horizons(self) -> None:
         if self._volume is None:

@@ -40,6 +40,45 @@ class Well:
             for log_name, values in self.logs.items():
                 grp.create_dataset(log_name, data=np.asarray(values, dtype=np.float32))
 
+    def intersect_section(
+        self,
+        axis: str,
+        index: int,
+        geometry,
+        slab: int = 1,
+    ) -> np.ndarray:
+        """Return (n_points, 2) array of (x_pixel, y_pixel) where the well
+        crosses the section.
+
+        For an inline section: surveys.inline coord must be within `slab`
+        of `index`. The well's xline coord (deviation x + surface_xy[0])
+        becomes the x_pixel; deviation md becomes the y_pixel after
+        time/sample-rate conversion (currently treats md as time-ms,
+        suitable for time-domain wells; depth conversion is v1.1).
+        """
+        deviation_x = self.deviation[:, 1] + self.surface_xy[0]  # xline coord
+        deviation_y = self.deviation[:, 2] + self.surface_xy[1]  # inline coord
+        md = self.deviation[:, 0]
+        sample_rate = geometry.sample_rate_ms
+
+        if axis == "inline":
+            # Keep points whose inline coord is within `slab` of `index`.
+            mask = np.abs(deviation_y - index) <= slab
+            if not mask.any():
+                return np.empty((0, 2), dtype=np.float32)
+            x_pix = (deviation_x[mask] - geometry.xline_min) // geometry.xline_step
+            y_pix = md[mask] / sample_rate
+        elif axis == "xline":
+            mask = np.abs(deviation_x - index) <= slab
+            if not mask.any():
+                return np.empty((0, 2), dtype=np.float32)
+            x_pix = (deviation_y[mask] - geometry.inline_min) // geometry.inline_step
+            y_pix = md[mask] / sample_rate
+        else:
+            return np.empty((0, 2), dtype=np.float32)
+
+        return np.column_stack([x_pix, y_pix]).astype(np.float32)
+
     @classmethod
     def load(cls, path: str | Path) -> Well:
         import h5py
