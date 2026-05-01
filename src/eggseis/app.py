@@ -427,7 +427,11 @@ class MainWindow(QMainWindow):
         from eggseis.data.horizon import import_xyz_csv
 
         if self._active_survey_id is None:
-            self.statusBar().showMessage("Open a survey first.", 3000)
+            QMessageBox.information(
+                self, "Import Horizon",
+                "Open a survey first (double-click one in the project tree), "
+                "then re-run this action."
+            )
             return
         path, _ = QFileDialog.getOpenFileName(
             self, "Import Horizon (XYZ CSV)", "", "CSV (*.csv);;All files (*)"
@@ -455,7 +459,11 @@ class MainWindow(QMainWindow):
         from eggseis.data.well import import_las
 
         if self._active_survey_id is None:
-            self.statusBar().showMessage("Open a survey first.", 3000)
+            QMessageBox.information(
+                self, "Import Well",
+                "Open a survey first (double-click one in the project tree), "
+                "then re-run this action."
+            )
             return
         path, _ = QFileDialog.getOpenFileName(
             self, "Import Well (LAS)", "", "LAS (*.las);;All files (*)"
