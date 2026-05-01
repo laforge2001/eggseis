@@ -148,6 +148,69 @@ def test_xyz_csv_skips_out_of_geometry_samples(tmp_path):
     assert h.grid[0, 0] == pytest.approx(55.0)
 
 
+def test_opendtect_ascii_importer_basic(tmp_path):
+    """OpendTect ASCII: comment lines start with '#' or '"'; data is whitespace-
+    separated columns. Default column order: inline xline X Y time."""
+    from eggseis.data.horizon import import_opendtect_ascii
+
+    f = tmp_path / "horizon.txt"
+    f.write_text(
+        '"Horizon export from OpendTect"\n'
+        "# Inline Crossline X Y Z\n"
+        "100 300 1000.0 2000.0 55.0\n"
+        "100 301 1010.0 2000.0 55.7\n"
+        "101 300 1000.0 2010.0 56.5\n"
+        "101 301 1010.0 2010.0 57.2\n"
+    )
+    h = import_opendtect_ascii(
+        f,
+        name="top",
+        inline_min=100, n_inlines=2, inline_step=1,
+        xline_min=300, n_xlines=2, xline_step=1,
+        geometry_ref="../survey.mdio",
+    )
+    np.testing.assert_array_equal(
+        h.grid, np.array([[55.0, 55.7], [56.5, 57.2]], dtype=np.float32)
+    )
+
+
+def test_opendtect_ascii_skips_blank_lines(tmp_path):
+    from eggseis.data.horizon import import_opendtect_ascii
+
+    f = tmp_path / "horizon.txt"
+    f.write_text(
+        "# header\n"
+        "\n"
+        "100 300 1000.0 2000.0 55.0\n"
+        "\n"
+        "100 301 1010.0 2000.0 55.7\n"
+    )
+    h = import_opendtect_ascii(
+        f,
+        name="top",
+        inline_min=100, n_inlines=1, inline_step=1,
+        xline_min=300, n_xlines=2, xline_step=1,
+        geometry_ref="x",
+    )
+    np.testing.assert_array_equal(h.grid, np.array([[55.0, 55.7]], dtype=np.float32))
+
+
+def test_opendtect_ascii_handles_three_column_input(tmp_path):
+    """Some exports lack X/Y — just inline xline time. Importer auto-detects."""
+    from eggseis.data.horizon import import_opendtect_ascii
+
+    f = tmp_path / "horizon.txt"
+    f.write_text("100 300 55.0\n100 301 55.7\n")
+    h = import_opendtect_ascii(
+        f,
+        name="top",
+        inline_min=100, n_inlines=1, inline_step=1,
+        xline_min=300, n_xlines=2, xline_step=1,
+        geometry_ref="x",
+    )
+    np.testing.assert_array_equal(h.grid, np.array([[55.0, 55.7]], dtype=np.float32))
+
+
 def test_save_creates_parent_directories(tmp_path):
     from eggseis.data.horizon import Horizon
 

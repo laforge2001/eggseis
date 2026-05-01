@@ -97,6 +97,64 @@ class Horizon:
         return v
 
 
+def import_opendtect_ascii(
+    path: str | Path,
+    *,
+    name: str,
+    inline_min: int,
+    n_inlines: int,
+    inline_step: int,
+    xline_min: int,
+    n_xlines: int,
+    xline_step: int,
+    geometry_ref: str,
+    color: str = DEFAULT_COLOR,
+) -> Horizon:
+    """Import an OpendTect ASCII horizon export.
+
+    Comment lines starting with `#` or `"` are skipped; blank lines too.
+    Data columns are whitespace-separated. Auto-detects column count:
+      - 5 cols: inline xline X Y time (drops X, Y)
+      - 3 cols: inline xline time
+    Other column counts raise ValueError.
+    """
+    grid = np.full((n_inlines, n_xlines), np.nan, dtype=np.float32)
+    with Path(path).open() as f:
+        for raw in f:
+            line = raw.strip()
+            if not line or line.startswith("#") or line.startswith('"'):
+                continue
+            parts = line.split()
+            if len(parts) == 5:
+                inline = int(parts[0])
+                xline = int(parts[1])
+                time = float(parts[4])
+            elif len(parts) == 3:
+                inline = int(parts[0])
+                xline = int(parts[1])
+                time = float(parts[2])
+            else:
+                raise ValueError(
+                    f"OpendTect ASCII: expected 3 or 5 columns, got {len(parts)} "
+                    f"on line {raw!r}"
+                )
+            i = (inline - inline_min) // inline_step
+            j = (xline - xline_min) // xline_step
+            if not (0 <= i < n_inlines and 0 <= j < n_xlines):
+                continue
+            grid[i, j] = time
+    return Horizon(
+        name=name,
+        grid=grid,
+        geometry_ref=geometry_ref,
+        color=color,
+        inline_min=inline_min,
+        xline_min=xline_min,
+        inline_step=inline_step,
+        xline_step=xline_step,
+    )
+
+
 def import_xyz_csv(
     path: str | Path,
     *,
