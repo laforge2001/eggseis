@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from dataclasses import replace as _replace
 from pathlib import Path
 
 import yaml
@@ -49,6 +50,14 @@ class Project:
     horizons: tuple[HorizonEntry, ...] = field(default_factory=tuple)
     wells: tuple[WellEntry, ...] = field(default_factory=tuple)
     schema_version: int = 0
+    graph: dict | None = None       # {"active_survey": str, "graph": Graph.to_dict()}
+    viewer: dict | None = None      # {"axis", "index", "colormap", "levels_locked"}
+
+    def with_graph(self, *, graph_dict: dict, active_survey: str) -> Project:
+        return _replace(self, graph={"active_survey": active_survey, "graph": graph_dict})
+
+    def with_viewer(self, viewer: dict) -> Project:
+        return _replace(self, viewer=dict(viewer))
 
     @classmethod
     def load(cls, project_dir: str | Path) -> Project:
@@ -100,6 +109,8 @@ class Project:
             horizons=tuple(horizons),
             wells=tuple(wells),
             schema_version=schema_version,
+            graph=data.get("graph"),
+            viewer=data.get("viewer"),
         )
 
     def save(self, path: Path | None = None) -> None:
@@ -123,4 +134,8 @@ class Project:
                 {"name": w.name, "path": str(w.path)}
                 for w in self.wells
             ]
+        if self.graph is not None:
+            out["graph"] = self.graph
+        if self.viewer is not None:
+            out["viewer"] = self.viewer
         manifest.write_text(yaml.safe_dump(out, sort_keys=False))
