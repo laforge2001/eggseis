@@ -59,6 +59,14 @@ class Project:
     def with_viewer(self, viewer: dict) -> Project:
         return _replace(self, viewer=dict(viewer))
 
+    def with_horizon_added(self, entry: HorizonEntry) -> Project:
+        existing = tuple(h for h in self.horizons if h.name != entry.name)
+        return _replace(self, horizons=(*existing, entry))
+
+    def with_well_added(self, entry: WellEntry) -> Project:
+        existing = tuple(w for w in self.wells if w.name != entry.name)
+        return _replace(self, wells=(*existing, entry))
+
     @classmethod
     def load(cls, project_dir: str | Path) -> Project:
         root = Path(project_dir).resolve()

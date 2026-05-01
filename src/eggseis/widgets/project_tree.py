@@ -29,11 +29,22 @@ class ProjectTreeWidget(QTreeWidget):
             item.setData(0, _PATH_ROLE, str(s.path))
             surveys.addChild(item)
         root.addChild(surveys)
-        root.addChild(QTreeWidgetItem(["Horizons"]))
-        root.addChild(QTreeWidgetItem(["Wells"]))
+
+        horizons = QTreeWidgetItem([f"Horizons ({len(project.horizons)})"])
+        for h in project.horizons:
+            horizons.addChild(QTreeWidgetItem([h.name]))
+        root.addChild(horizons)
+
+        wells = QTreeWidgetItem([f"Wells ({len(project.wells)})"])
+        for w in project.wells:
+            wells.addChild(QTreeWidgetItem([w.name]))
+        root.addChild(wells)
+
         self.addTopLevelItem(root)
         root.setExpanded(True)
         surveys.setExpanded(True)
+        horizons.setExpanded(True)
+        wells.setExpanded(True)
 
     def _on_double_click(self, item: QTreeWidgetItem, _col: int) -> None:
         path_str = item.data(0, _PATH_ROLE)

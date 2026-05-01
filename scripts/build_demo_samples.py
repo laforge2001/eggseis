@@ -59,7 +59,7 @@ def build_well_las() -> None:
     )
     rows = "\n".join(
         f"{m:7.2f}  {g:6.2f}  {rh:6.3f}"
-        for m, g, rh in zip(md, gr, rhob)
+        for m, g, rh in zip(md, gr, rhob, strict=True)
     )
     out.write_text(header + rows + "\n")
     print(f"wrote {out} ({len(md)} samples)")

@@ -453,6 +453,20 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Import failed", str(exc))
             return
         self.section_viewer.add_horizon_overlay(horizon)
+        # Persist + register in the project model so the tree reflects it.
+        if self._project is not None:
+            from eggseis.project import HorizonEntry
+            target_dir = self._project.root / "horizons" / horizon.name
+            try:
+                horizon.save(target_dir)
+            except Exception as exc:
+                QMessageBox.warning(self, "Horizon save failed", str(exc))
+            else:
+                entry = HorizonEntry(
+                    name=horizon.name, path=target_dir, color=horizon.color
+                )
+                self._project = self._project.with_horizon_added(entry)
+                self.tree.set_project(self._project)
         self.statusBar().showMessage(f"Imported horizon {horizon.name}", 3000)
 
     def _on_import_well(self) -> None:
@@ -481,6 +495,17 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Import failed", str(exc))
             return
         self.section_viewer.add_well_overlay(well)
+        if self._project is not None:
+            from eggseis.project import WellEntry
+            target = self._project.root / "wells" / f"{well.name}.h5"
+            try:
+                well.save(target)
+            except Exception as exc:
+                QMessageBox.warning(self, "Well save failed", str(exc))
+            else:
+                entry = WellEntry(name=well.name, path=target)
+                self._project = self._project.with_well_added(entry)
+                self.tree.set_project(self._project)
         self.statusBar().showMessage(f"Imported well {well.name}", 3000)
 
     def _on_save_project(self) -> None:
