@@ -10,6 +10,11 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from eggseis.axes import Axis
 from eggseis.colormaps import get_lut
 from eggseis.data import SeismicVolume
+from eggseis.data.horizon import Horizon
+from eggseis.viewers.horizon_overlay import (
+    inline_polyline_points,
+    xline_polyline_points,
+)
 
 DEFAULT_LUT = "gray"
 _MOUSE_RATE_HZ = 60
@@ -51,6 +56,11 @@ class SectionViewer(QWidget):
             rateLimit=_MOUSE_RATE_HZ,
             slot=self._on_mouse_moved,
         )
+
+        # Horizon overlays keyed by horizon name; values hold both the
+        # Horizon model and the pyqtgraph plot item so we can re-render
+        # the polyline on every slice change without re-adding the item.
+        self._horizon_overlays: dict[str, tuple[Horizon, pg.PlotDataItem]] = {}
 
     @property
     def current_axis(self) -> str:
@@ -126,6 +136,42 @@ class SectionViewer(QWidget):
         self._partial_overlay = False
         self._baseline_levels = None
         self._render()
+        self._refresh_horizons()
+
+    # --- horizon overlays --------------------------------------------------
+
+    def add_horizon_overlay(self, horizon: Horizon) -> None:
+        item = pg.PlotDataItem(pen=pg.mkPen(horizon.color, width=2))
+        self._plot.addItem(item)
+        self._horizon_overlays[horizon.name] = (horizon, item)
+        self._refresh_horizons()
+
+    def remove_horizon_overlay(self, name: str) -> None:
+        entry = self._horizon_overlays.pop(name, None)
+        if entry is not None:
+            _, item = entry
+            self._plot.removeItem(item)
+
+    def horizon_count(self) -> int:
+        return len(self._horizon_overlays)
+
+    def _refresh_horizons(self) -> None:
+        if self._volume is None:
+            return
+        geom = self._volume.geometry
+        for horizon, item in self._horizon_overlays.values():
+            if self._axis is Axis.INLINE:
+                pts = inline_polyline_points(horizon, geom, self._index)
+            elif self._axis is Axis.XLINE:
+                pts = xline_polyline_points(horizon, geom, self._index)
+            else:
+                # Timeslice: no polyline (would need a contour). Hide.
+                item.setData(x=[], y=[])
+                continue
+            if pts.size:
+                item.setData(x=pts[:, 0], y=pts[:, 1])
+            else:
+                item.setData(x=[], y=[])
 
     def set_colormap(self, name: str) -> None:
         self._lut_name = name
