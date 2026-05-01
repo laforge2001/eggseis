@@ -128,6 +128,17 @@ class MainWindow(QMainWindow):
         m_file.addAction(a_open)
         m_file.addAction(a_new_plugin)
         m_file.addSeparator()
+        a_import_horizon = QAction("&Import Horizon (XYZ CSV)…", self)
+        a_import_horizon.triggered.connect(self._on_import_horizon)
+        a_import_well = QAction("Import &Well (LAS)…", self)
+        a_import_well.triggered.connect(self._on_import_well)
+        m_file.addAction(a_import_horizon)
+        m_file.addAction(a_import_well)
+        m_file.addSeparator()
+        a_save_project = QAction("&Save Project", self)
+        a_save_project.triggered.connect(self._on_save_project)
+        m_file.addAction(a_save_project)
+        m_file.addSeparator()
         m_file.addAction(a_quit)
 
         m_view = self.menuBar().addMenu("&View")
@@ -409,6 +420,87 @@ class MainWindow(QMainWindow):
         if self._active_survey_id is None:
             return None
         return self._canvas.add_plugin(spec)
+
+    def _on_import_horizon(self) -> None:
+        from eggseis.data.horizon import import_xyz_csv
+
+        if self._active_survey_id is None:
+            self.statusBar().showMessage("Open a survey first.", 3000)
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Horizon (XYZ CSV)", "", "CSV (*.csv);;All files (*)"
+        )
+        if not path:
+            return
+        geom = self.section_viewer.geometry
+        try:
+            horizon = import_xyz_csv(
+                Path(path),
+                name=Path(path).stem,
+                inline_min=geom.inline_min, n_inlines=geom.n_inlines,
+                inline_step=geom.inline_step,
+                xline_min=geom.xline_min, n_xlines=geom.n_xlines,
+                xline_step=geom.xline_step,
+                geometry_ref=str(self._active_survey_id),
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Import failed", str(exc))
+            return
+        self.section_viewer.add_horizon_overlay(horizon)
+        self.statusBar().showMessage(f"Imported horizon {horizon.name}", 3000)
+
+    def _on_import_well(self) -> None:
+        from eggseis.data.well import import_las
+
+        if self._active_survey_id is None:
+            self.statusBar().showMessage("Open a survey first.", 3000)
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Well (LAS)", "", "LAS (*.las);;All files (*)"
+        )
+        if not path:
+            return
+        geom = self.section_viewer.geometry
+        center = (
+            (geom.xline_min + geom.n_xlines // 2),
+            (geom.inline_min + geom.n_inlines // 2),
+        )
+        try:
+            well = import_las(Path(path), name=Path(path).stem, surface_xy=center)
+        except Exception as exc:
+            QMessageBox.critical(self, "Import failed", str(exc))
+            return
+        self.section_viewer.add_well_overlay(well)
+        self.statusBar().showMessage(f"Imported well {well.name}", 3000)
+
+    def _on_save_project(self) -> None:
+        if self._project is None:
+            self.statusBar().showMessage("No project loaded.", 3000)
+            return
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        graph_dict = graph.to_dict() if graph is not None else None
+        viewer_state = {
+            "axis": self.section_viewer.current_axis,
+            "index": self.section_viewer.current_index,
+            "colormap": self.section_viewer.lut_name,
+            "levels_locked": self.section_viewer.levels_locked,
+        }
+        proj = self._project
+        if graph_dict is not None and self._active_survey_id is not None:
+            proj = proj.with_graph(
+                graph_dict=graph_dict,
+                active_survey=Path(self._active_survey_id).stem,
+            )
+        proj = proj.with_viewer(viewer_state)
+        try:
+            proj.save()
+            self._project = proj
+            self.statusBar().showMessage("Project saved.", 3000)
+        except Exception as exc:
+            QMessageBox.critical(self, "Save failed", str(exc))
 
     def _on_node_double_clicked_open_params(self, scene_node) -> None:
         node_id = self._canvas._scene_node_to_graph_id(scene_node)
