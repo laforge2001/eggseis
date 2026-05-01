@@ -25,6 +25,9 @@ class Well:
     logs: dict[str, np.ndarray] = field(default_factory=dict)
     markers: list[tuple[str, float]] = field(default_factory=list)
     surface_xy: tuple[float, float] = (0.0, 0.0)
+    domain: str = "time_ms"              # "time_ms" or "depth"; intersect_section
+                                         # treats md column as time-ms when "time_ms".
+                                         # depth-domain wells need TWT conversion (v1.1).
 
     def save(self, path: str | Path) -> None:
         import h5py
@@ -50,12 +53,15 @@ class Well:
         """Return (n_points, 2) array of (x_pixel, y_pixel) where the well
         crosses the section.
 
-        For an inline section: surveys.inline coord must be within `slab`
-        of `index`. The well's xline coord (deviation x + surface_xy[0])
-        becomes the x_pixel; deviation md becomes the y_pixel after
-        time/sample-rate conversion (currently treats md as time-ms,
-        suitable for time-domain wells; depth conversion is v1.1).
+        Currently only `domain == "time_ms"` is supported — the deviation
+        md column is treated as time in ms and converted to sample index.
+        Depth-domain wells raise ValueError until TWT conversion lands (v1.1).
         """
+        if self.domain != "time_ms":
+            raise ValueError(
+                f"Well {self.name!r} domain={self.domain!r} not supported; "
+                "only 'time_ms' wells render today (depth needs TWT conversion, v1.1)"
+            )
         deviation_x = self.deviation[:, 1] + self.surface_xy[0]  # xline coord
         deviation_y = self.deviation[:, 2] + self.surface_xy[1]  # inline coord
         md = self.deviation[:, 0]
@@ -120,7 +126,11 @@ def import_las(
     (x = y = 0). Real deviated wells need a separate XYZ deviation file —
     use `Well(deviation=...)` directly for those.
 
-    LAS NULL values are converted to NaN.
+    LAS NULL values are converted to NaN. The returned Well's `domain`
+    is `"time_ms"` — the importer assumes the LAS depth axis is time in
+    milliseconds. For depth-domain LAS files the result will plot at the
+    wrong y-position; convert to TWT before import (v1.1 will handle this
+    in-app).
     """
     import lasio
 

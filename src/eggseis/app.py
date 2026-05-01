@@ -98,6 +98,7 @@ class MainWindow(QMainWindow):
 
         self._graphs: dict[str, Graph] = {}
         self._active_survey_id: str | None = None
+        self._active_survey_name: str | None = None  # SurveyEntry.name from project.yaml
         self._canvas.edgeChanged.connect(self._request_tap)
         self._canvas.tapPortChanged.connect(lambda _id, _port: self._request_tap())
         # Pre-register every discovered plugin so qtpynodeeditor's
@@ -298,7 +299,7 @@ class MainWindow(QMainWindow):
         self.tree.set_project(self._project)
         self.setWindowTitle(f"eggseis — {self._project.name}")
 
-    def open_survey(self, survey_path: Path) -> None:
+    def open_survey(self, survey_path: Path, *, survey_name: str | None = None) -> None:
         if getattr(self, "_opening_survey", False):
             return  # Defensive: ignore re-entry from rapid double-clicks.
         self._opening_survey = True
@@ -309,6 +310,7 @@ class MainWindow(QMainWindow):
                 volume = SeismicVolume(MDIOBackend(survey_path), name=survey_path.stem)
                 survey_id = str(survey_path.resolve())
                 self._active_survey_id = survey_id
+                self._active_survey_name = survey_name or survey_path.stem
                 self._graphs.setdefault(survey_id, Graph())
                 self.section_viewer.set_volume(volume)
                 self.slice_nav.set_geometry(volume.geometry)
@@ -489,10 +491,10 @@ class MainWindow(QMainWindow):
             "levels_locked": self.section_viewer.levels_locked,
         }
         proj = self._project
-        if graph_dict is not None and self._active_survey_id is not None:
+        if graph_dict is not None and self._active_survey_name is not None:
             proj = proj.with_graph(
                 graph_dict=graph_dict,
-                active_survey=Path(self._active_survey_id).stem,
+                active_survey=self._active_survey_name,
             )
         proj = proj.with_viewer(viewer_state)
         try:

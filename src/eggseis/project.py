@@ -92,15 +92,20 @@ class Project:
 
         horizons: list[HorizonEntry] = []
         for h in data.get("horizons", []) or []:
+            # Relative paths resolve against the project root, matching surveys.
+            raw = Path(h["path"])
+            resolved = raw if raw.is_absolute() else (root / raw)
             horizons.append(HorizonEntry(
                 name=h["name"],
-                path=Path(h["path"]),
+                path=resolved,
                 color=h.get("color", "#ffcc00"),
             ))
 
         wells: list[WellEntry] = []
         for w in data.get("wells", []) or []:
-            wells.append(WellEntry(name=w["name"], path=Path(w["path"])))
+            raw = Path(w["path"])
+            resolved = raw if raw.is_absolute() else (root / raw)
+            wells.append(WellEntry(name=w["name"], path=resolved))
 
         return cls(
             name=data["name"],
@@ -126,12 +131,12 @@ class Project:
         }
         if self.horizons:
             out["horizons"] = [
-                {"name": h.name, "path": str(h.path), "color": h.color}
+                {"name": h.name, "path": _rel_or_abs(h.path, self.root), "color": h.color}
                 for h in self.horizons
             ]
         if self.wells:
             out["wells"] = [
-                {"name": w.name, "path": str(w.path)}
+                {"name": w.name, "path": _rel_or_abs(w.path, self.root)}
                 for w in self.wells
             ]
         if self.graph is not None:
