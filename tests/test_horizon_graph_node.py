@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from eggseis.graph.model import SOURCE_ID, Graph, Node
+from eggseis.graph.model import SOURCE_ID, Graph, Node, OrphanHorizonError
 
 
 def test_node_defaults_to_plugin_kind(linear_spec):
@@ -137,3 +137,41 @@ def test_horizon_node_excluded_from_upstream_cone(linear_spec):
     h = g.add_horizon_node(horizon_name="top")
     cone = g.upstream_cone(n.node_id, "out")
     assert h not in cone
+
+
+def test_horizon_node_serialises_with_kind_and_name():
+    g = Graph()
+    g.add_horizon_node(horizon_name="top_reservoir", pos=(120.0, 50.0))
+    d = g.to_dict()
+    horizon_dicts = [n for n in d["nodes"] if n.get("kind") == "horizon"]
+    assert len(horizon_dicts) == 1
+    assert horizon_dicts[0]["horizon_name"] == "top_reservoir"
+    assert horizon_dicts[0]["pos"] == [120.0, 50.0]
+
+
+def test_associations_and_pinned_overlays_round_trip(linear_spec):
+    g = Graph()
+    nid = g.add_horizon_node(horizon_name="top")
+    d = g.to_dict()
+    assert d["associations"] == [{"horizon_node_id": nid, "source_node_id": SOURCE_ID}]
+    assert d["pinned_overlays"] == [nid]
+
+
+def test_from_dict_reconstructs_horizon_node(linear_spec):
+    g = Graph()
+    nid = g.add_horizon_node(horizon_name="top")
+    d = g.to_dict()
+    plugins = {linear_spec.id: linear_spec}
+    horizons = {"top": object()}  # any sentinel; from_dict only checks membership
+    rebuilt = Graph.from_dict(d, plugins=plugins, horizons=horizons)
+    assert rebuilt.nodes[nid].kind == "horizon"
+    assert rebuilt.nodes[nid].horizon_name == "top"
+    assert rebuilt.pinned_overlays == {nid}
+
+
+def test_orphan_horizon_on_load_raises(linear_spec):
+    g = Graph()
+    g.add_horizon_node(horizon_name="missing")
+    d = g.to_dict()
+    with pytest.raises(OrphanHorizonError, match="missing"):
+        Graph.from_dict(d, plugins={linear_spec.id: linear_spec}, horizons={})

@@ -529,18 +529,27 @@ class Graph:
     # --- serialisation ----------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "nodes": [
-                {
+        node_dicts = []
+        for n in self.nodes.values():
+            if n.kind == "horizon":
+                node_dicts.append({
                     "node_id": n.node_id,
+                    "kind": "horizon",
+                    "horizon_name": n.horizon_name,
+                    "pos": list(n.pos),
+                })
+            else:
+                node_dicts.append({
+                    "node_id": n.node_id,
+                    "kind": "plugin",
                     "plugin_id": n.spec.id,
                     "plugin_version": n.spec.version,
                     "params": n.params.model_dump(),
                     "enabled": n.enabled,
                     "pos": list(n.pos),
-                }
-                for n in self.nodes.values()
-            ],
+                })
+        return {
+            "nodes": node_dicts,
             "edges": [
                 {
                     "src_node_id": e.src_node_id,
@@ -551,24 +560,50 @@ class Graph:
                 for e in self.edges
             ],
             "tap_port": list(self.tap_port),
+            "associations": [
+                {"horizon_node_id": a.horizon_node_id, "source_node_id": a.source_node_id}
+                for a in self.associations
+            ],
+            "pinned_overlays": list(self.pinned_overlays),
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any], registry: dict[str, PluginSpec]) -> Graph:
+    def from_dict(
+        cls,
+        d: dict[str, Any],
+        *,
+        plugins: dict[str, PluginSpec],
+        horizons: dict[str, Any] | None = None,
+    ) -> Graph:
         g = cls()
         for node_dict in d["nodes"]:
-            plugin_id = node_dict["plugin_id"]
-            spec = registry.get(plugin_id)
-            if spec is None:
-                raise OrphanPluginError(plugin_id)
-            params = spec.param_model(**node_dict["params"])
-            node = Node(
-                spec=spec,
-                params=params,
-                enabled=node_dict.get("enabled", True),
-                pos=tuple(node_dict.get("pos", (0.0, 0.0))),
-                node_id=node_dict["node_id"],
-            )
+            kind = node_dict.get("kind", "plugin")
+            if kind == "horizon":
+                horizon_name = node_dict["horizon_name"]
+                if horizons is None or horizon_name not in horizons:
+                    raise OrphanHorizonError(horizon_name)
+                node = Node(
+                    spec=None,
+                    params=None,
+                    kind="horizon",
+                    horizon_name=horizon_name,
+                    pos=tuple(node_dict.get("pos", (0.0, 0.0))),
+                    node_id=node_dict["node_id"],
+                )
+            else:
+                plugin_id = node_dict["plugin_id"]
+                spec = plugins.get(plugin_id)
+                if spec is None:
+                    raise OrphanPluginError(plugin_id)
+                params = spec.param_model(**node_dict["params"])
+                node = Node(
+                    spec=spec,
+                    params=params,
+                    enabled=node_dict.get("enabled", True),
+                    pos=tuple(node_dict.get("pos", (0.0, 0.0))),
+                    node_id=node_dict["node_id"],
+                    kind="plugin",
+                )
             g.nodes[node.node_id] = node
         for edge_dict in d["edges"]:
             g.edges.append(
@@ -580,6 +615,14 @@ class Graph:
                 )
             )
         g.tap_port = tuple(d.get("tap_port", (SOURCE_ID, "inline")))
+        for a in d.get("associations", []):
+            g.associations.append(
+                Association(
+                    horizon_node_id=a["horizon_node_id"],
+                    source_node_id=a["source_node_id"],
+                )
+            )
+        g.pinned_overlays = set(d.get("pinned_overlays", []))
         # Skip undo recording for the load path.
         g._undo.clear()
         g._redo.clear()
