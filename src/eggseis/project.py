@@ -67,6 +67,18 @@ class Project:
         existing = tuple(w for w in self.wells if w.name != entry.name)
         return _replace(self, wells=(*existing, entry))
 
+    def load_horizon(self, name: str):
+        """Look up a HorizonEntry by name and return the loaded Horizon object.
+
+        Raises KeyError if no entry matches.
+        """
+        from eggseis.data.horizon import Horizon
+
+        entry = next((h for h in self.horizons if h.name == name), None)
+        if entry is None:
+            raise KeyError(f"horizon {name!r} not in project")
+        return Horizon.load(entry.path)
+
     @classmethod
     def load(cls, project_dir: str | Path) -> Project:
         root = Path(project_dir).resolve()

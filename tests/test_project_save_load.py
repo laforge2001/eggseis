@@ -108,3 +108,23 @@ def test_save_load_preserves_horizons(tmp_path):
     reloaded = Project.load(root)
     assert len(reloaded.horizons) == 1
     assert reloaded.horizons[0].name == "top"
+
+
+def test_project_load_horizon_returns_horizon_object(tmp_path):
+    from eggseis.data.horizon import Horizon
+    from eggseis.project import Project
+
+    root = _project_with_horizon(tmp_path)
+    p = Project.load(root)
+    h = p.load_horizon("top")
+    assert isinstance(h, Horizon)
+    assert h.name == "top"
+
+
+def test_project_load_horizon_unknown_raises(tmp_path):
+    from eggseis.project import Project
+
+    root = _project_with_horizon(tmp_path)
+    p = Project.load(root)
+    with pytest.raises(KeyError, match="missing"):
+        p.load_horizon("missing")
