@@ -314,6 +314,32 @@ class Graph:
         # Topo sort within the cone.
         return self._topo_sort(cone)
 
+    def visible_horizons_for_tap(
+        self, tap_node: str, tap_port: str
+    ) -> list[str]:
+        """Return horizon node_ids whose Source is upstream of (tap_node, tap_port)
+        AND that are pinned.
+
+        v1.0: only one Source exists, and Source is in every cone, so this
+        reduces to "every pinned horizon node currently in the graph".
+        Locked now to keep the contract right when multi-source lands.
+        """
+        if not self.pinned_overlays:
+            return []
+        if tap_node == SOURCE_ID:
+            cone: set[str] = {SOURCE_ID}
+        else:
+            cone = set(self.upstream_cone(tap_node, tap_port))
+        visible = []
+        for nid in self.pinned_overlays:
+            assoc = next(
+                (a for a in self.associations if a.horizon_node_id == nid),
+                None,
+            )
+            if assoc is not None and assoc.source_node_id in cone:
+                visible.append(nid)
+        return visible
+
     def _topo_sort(self, ids: set[str]) -> list[str]:
         in_degree: dict[str, int] = {nid: 0 for nid in ids}
         for e in self.edges:

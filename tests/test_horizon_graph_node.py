@@ -106,3 +106,34 @@ def test_undo_after_remove_horizon_restores_association_and_pin():
 def test_unpin_overlay_unknown_id_is_silent():
     g = Graph()
     g.unpin_overlay("nonexistent-id")  # must not raise
+
+
+def test_visible_horizons_for_tap_when_source_in_cone(linear_spec):
+    """v1.0: every pinned horizon is visible because Source is always in the cone."""
+    g = Graph()
+    n = Node(spec=linear_spec, params=linear_spec.param_model())
+    g.add_node(n)
+    from eggseis.graph.model import Edge
+    g.connect(Edge(SOURCE_ID, "inline", n.node_id, "traces"))
+    g.set_tap(n.node_id)
+    h = g.add_horizon_node(horizon_name="top")
+    assert g.visible_horizons_for_tap(*g.tap_port) == [h]
+
+
+def test_visible_horizons_for_tap_excludes_unpinned():
+    g = Graph()
+    h = g.add_horizon_node(horizon_name="top")
+    g.unpin_overlay(h)
+    assert g.visible_horizons_for_tap(*g.tap_port) == []
+
+
+def test_horizon_node_excluded_from_upstream_cone(linear_spec):
+    """Horizon nodes must not appear in upstream_cone results."""
+    from eggseis.graph.model import Edge
+    g = Graph()
+    n = Node(spec=linear_spec, params=linear_spec.param_model())
+    g.add_node(n)
+    g.connect(Edge(SOURCE_ID, "inline", n.node_id, "traces"))
+    h = g.add_horizon_node(horizon_name="top")
+    cone = g.upstream_cone(n.node_id, "out")
+    assert h not in cone
