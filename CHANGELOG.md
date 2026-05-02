@@ -2,6 +2,29 @@
 
 All notable changes to eggseis are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [PEP 440](https://peps.python.org/pep-0440/).
 
+## [Unreleased] — M7 in progress
+
+### Added
+- Horizons-as-graph-nodes: each horizon can appear as a node on the
+  canvas, dashed-edge associated with Source. Pin/unpin per horizon
+  controls section-viewer overlay visibility independently of the
+  compute tap. Multiple horizons can be pinned at once. Branch-scoped
+  binding (overlay shows when the horizon's Source is in the upstream
+  cone of the current tap) — locked now so the multi-source future
+  picks up the contract correctly.
+- New `Graph.associations`, `Graph.pinned_overlays`,
+  `Graph.add_horizon_node`, `Graph.visible_horizons_for_tap`.
+- `Graph.from_dict` signature is now keyword-only:
+  `Graph.from_dict(d, *, plugins=..., horizons=None)`. Existing M6
+  callers updated.
+- New canvas APIs: `add_horizon_node`, `set_horizon_pinned`,
+  `register_horizons`, `horizon_names_available`. Dashed `QGraphicsLineItem`
+  drawn between horizon and Source bounding-rect centers; updates on
+  `node_moved`.
+- New `Project.load_horizon(name)` helper.
+- New `Graph → Add Horizon to Graph…` menu action.
+- New right-click context menu on horizon nodes: Pin / Unpin / Remove.
+
 ## [0.1.0a6] — 2026-04-30
 
 **M6 — "The graph branches" complete.**

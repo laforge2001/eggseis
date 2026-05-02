@@ -254,3 +254,10 @@ is a visual node-graph canvas instead of a list-style dock.
   remains the central workspace. The legacy menu-driven `Attribute`
   path is still available alongside the canvas for quick single-attribute
   applies.
+
+- **Horizon nodes (M7+).** Horizons in the project tree can be added to
+  the canvas via `Graph → Add Horizon to Graph…` or right-clicking the
+  canvas. They render as small nodes with no ports, dashed-edge linked
+  to Source. Right-click → Pin / Unpin controls the section-viewer
+  overlay. Pin state is per-graph; multiple horizons may be pinned
+  simultaneously.
