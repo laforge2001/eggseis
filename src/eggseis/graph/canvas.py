@@ -132,6 +132,7 @@ class GraphCanvas(QWidget):
     edgeChanged = Signal()                # any structural connect/disconnect
     tapPortChanged = Signal(str, str)     # node_id, port
     selectionChanged = Signal(str)        # node_id selected (or "")
+    overlayChanged = Signal(str)          # horizon node_id whose pin state flipped
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -238,6 +239,15 @@ class GraphCanvas(QWidget):
         self._add_dashed_line(nid)
         self.nodeAdded.emit(nid)
         return nid
+
+    def set_horizon_pinned(self, node_id: str, pinned: bool) -> None:
+        if self._graph is None:
+            return
+        if pinned:
+            self._graph.pin_overlay(node_id)
+        else:
+            self._graph.unpin_overlay(node_id)
+        self.overlayChanged.emit(node_id)
 
     def horizon_scene_node_for(self, node_id: str):
         return self._horizon_scene_nodes.get(node_id)

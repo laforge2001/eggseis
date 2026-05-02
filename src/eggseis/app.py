@@ -577,6 +577,11 @@ class MainWindow(QMainWindow):
             return
         graph = self._graphs[self._active_survey_id]
         node = graph.nodes[node_id]
+
+        if node.kind == "horizon":
+            self._build_horizon_context_menu(node_id, screen_pos)
+            return
+
         is_multi_input = len(node.spec.inputs) > 1
 
         menu = QMenu(self)
@@ -603,6 +608,24 @@ class MainWindow(QMainWindow):
             lambda _checked, nid=node_id: self._canvas.remove_node(nid)
         )
         menu.addAction(action_remove)
+        menu.exec_(screen_pos)
+
+    def _build_horizon_context_menu(self, node_id: str, screen_pos) -> None:
+        graph = self._graphs[self._active_survey_id]
+        is_pinned = node_id in graph.pinned_overlays
+        menu = QMenu(self)
+        toggle = QAction("Unpin overlay" if is_pinned else "Pin overlay", self)
+        toggle.triggered.connect(
+            lambda _checked, nid=node_id, on=not is_pinned:
+                self._canvas.set_horizon_pinned(nid, on)
+        )
+        menu.addAction(toggle)
+        menu.addSeparator()
+        remove = QAction("Remove", self)
+        remove.triggered.connect(
+            lambda _checked, nid=node_id: self._canvas.remove_node(nid)
+        )
+        menu.addAction(remove)
         menu.exec_(screen_pos)
 
     def _on_export_volume(self) -> None:

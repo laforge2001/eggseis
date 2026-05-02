@@ -65,3 +65,24 @@ def test_register_horizons_empty_list_clears(canvas):
     canvas.register_horizons(["top"])
     canvas.register_horizons([])
     assert canvas.horizon_names_available() == []
+
+
+def test_pin_and_unpin_via_canvas_methods(canvas):
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    canvas.set_horizon_pinned(nid, False)
+    assert nid not in g.pinned_overlays
+    canvas.set_horizon_pinned(nid, True)
+    assert nid in g.pinned_overlays
+
+
+def test_set_horizon_pinned_emits_overlay_changed_signal(canvas, qtbot):
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+
+    received = []
+    canvas.overlayChanged.connect(received.append)
+    canvas.set_horizon_pinned(nid, False)
+    assert received == [nid]
