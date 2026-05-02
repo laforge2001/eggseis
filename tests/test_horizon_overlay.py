@@ -102,3 +102,14 @@ def test_unknown_horizon_remove_is_noop(qtbot, fake_backend):
     viewer.set_volume(SeismicVolume(fake_backend))
     viewer.remove_horizon_overlay("nope")  # silently ignored
     assert viewer.horizon_count() == 0
+
+
+def test_horizon_overlay_names_returns_keys(qtbot, fake_backend):
+    from eggseis.viewers.section import SectionViewer
+
+    viewer = SectionViewer()
+    qtbot.addWidget(viewer)
+    vol = SeismicVolume(fake_backend)
+    viewer.set_volume(vol)
+    viewer.add_horizon_overlay(_horizon_for(vol.geometry))
+    assert viewer.horizon_overlay_names() == ["top"]

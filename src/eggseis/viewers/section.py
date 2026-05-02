@@ -158,6 +158,9 @@ class SectionViewer(QWidget):
     def horizon_count(self) -> int:
         return len(self._horizon_overlays)
 
+    def horizon_overlay_names(self) -> list[str]:
+        return list(self._horizon_overlays.keys())
+
     # --- well overlays ----------------------------------------------------
 
     def add_well_overlay(self, well: Well, *, color: str = "#3399ff") -> None:
