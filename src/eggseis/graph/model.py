@@ -18,7 +18,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -48,6 +48,16 @@ class OrphanPluginError(KeyError):
     """Raised by `Graph.from_dict` when a plugin id is missing from the registry."""
 
 
+class OrphanHorizonError(KeyError):
+    """Raised by Graph.from_dict when a horizon name is missing from the registry."""
+
+
+@dataclass(frozen=True)
+class Association:
+    horizon_node_id: str
+    source_node_id: str = SOURCE_ID  # v1.0 has only the implicit Source
+
+
 @dataclass(frozen=True)
 class Edge:
     src_node_id: str
@@ -58,11 +68,13 @@ class Edge:
 
 @dataclass
 class Node:
-    spec: PluginSpec
-    params: BaseModel
+    spec: PluginSpec | None
+    params: BaseModel | None = None
     enabled: bool = True
     pos: tuple[float, float] = (0.0, 0.0)
     node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    kind: Literal["plugin", "horizon"] = "plugin"
+    horizon_name: str | None = None
 
 
 @dataclass
