@@ -162,6 +162,9 @@ class MainWindow(QMainWindow):
         a_add_node = QAction("&Add Plugin to Graph…", self)
         a_add_node.triggered.connect(self._on_add_node_to_graph)
         m_graph.addAction(a_add_node)
+        a_add_horizon = QAction("Add &Horizon to Graph…", self)
+        a_add_horizon.triggered.connect(self._on_add_horizon_to_graph)
+        m_graph.addAction(a_add_horizon)
         m_graph.addSeparator()
         a_export = QAction("&Export Volume with Graph Applied…", self)
         a_export.triggered.connect(self._on_export_volume)
@@ -315,6 +318,10 @@ class MainWindow(QMainWindow):
                 self.section_viewer.set_volume(volume)
                 self.slice_nav.set_geometry(volume.geometry)
                 self._canvas.bind(self._graphs[survey_id])
+                if self._project is not None:
+                    self._canvas.register_horizons(
+                        [h.name for h in self._project.horizons]
+                    )
                 self._close_all_popups()
                 if self._graphs[survey_id].nodes:
                     self._request_tap()
@@ -467,6 +474,9 @@ class MainWindow(QMainWindow):
                 )
                 self._project = self._project.with_horizon_added(entry)
                 self.tree.set_project(self._project)
+                self._canvas.register_horizons(
+                    [h.name for h in self._project.horizons]
+                )
         self.statusBar().showMessage(f"Imported horizon {horizon.name}", 3000)
 
     def _on_import_well(self) -> None:
@@ -651,6 +661,28 @@ class MainWindow(QMainWindow):
             return
         spec = next(s for s in specs if s.name == choice)
         self.add_plugin_to_graph(spec)
+
+    def _on_add_horizon_to_graph(self) -> None:
+        if self._active_survey_id is None:
+            QMessageBox.information(
+                self, "Add Horizon",
+                "Open a survey first, then re-run this action."
+            )
+            return
+        names = self._canvas.horizon_names_available()
+        if not names:
+            QMessageBox.information(
+                self, "Add Horizon",
+                "No horizons in this project. Import one first via "
+                "File → Import Horizon."
+            )
+            return
+        choice, ok = QInputDialog.getItem(
+            self, "Add Horizon to Graph", "Horizon:", names, 0, False
+        )
+        if not ok:
+            return
+        self._canvas.add_horizon_node(choice)
 
     def _on_node_params_changed(self, node_id: str, params) -> None:
         graph = (

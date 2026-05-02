@@ -48,3 +48,20 @@ def test_dashed_line_endpoints_update_on_node_move(canvas):
     canvas._refresh_dashed_lines()
     new_p1 = (line.line().p1().x(), line.line().p1().y())
     assert new_p1 != line_p1
+
+
+def test_canvas_register_horizons_populates_add_horizon_submenu(canvas):
+    """register_horizons makes names available for the Add Horizon submenu."""
+    g = Graph()
+    canvas.bind(g)
+    canvas.register_horizons(["top", "base", "channel"])
+    names = canvas.horizon_names_available()
+    assert names == ["top", "base", "channel"]
+
+
+def test_register_horizons_empty_list_clears(canvas):
+    g = Graph()
+    canvas.bind(g)
+    canvas.register_horizons(["top"])
+    canvas.register_horizons([])
+    assert canvas.horizon_names_available() == []

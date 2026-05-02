@@ -143,6 +143,7 @@ class GraphCanvas(QWidget):
         self._source_scene_node: qne.Node | None = None
         self._horizon_scene_nodes: dict[str, qne.Node] = {}
         self._dashed_lines: dict[str, QGraphicsLineItem] = {}
+        self._horizon_names_available: list[str] = []
         # Maps spec.id -> (model_class, spec). Generated NodeDataModel
         # subclasses are reverse-keyed by class name to translate
         # lib-side node_created back into our model.
@@ -181,6 +182,14 @@ class GraphCanvas(QWidget):
         """
         for spec in specs:
             self._ensure_spec_registered(spec)
+
+    def register_horizons(self, names: list[str]) -> None:
+        """Set the list of horizon names available in the right-click menu.
+        MainWindow calls this whenever Project.horizons changes."""
+        self._horizon_names_available = list(names)
+
+    def horizon_names_available(self) -> list[str]:
+        return list(self._horizon_names_available)
 
     def _ensure_spec_registered(self, spec: PluginSpec) -> type[NodeDataModel]:
         entry = self._registered.get(spec.id)
