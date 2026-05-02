@@ -365,3 +365,38 @@ def test_graph_subtract_tap_ready(qtbot, demo_project_path):
     with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
         canvas.set_tap(sub, "out")
     assert win.section_viewer.has_overlay
+
+
+def test_pin_unpin_horizon_node_updates_section_viewer(qtbot, demo_project_path):
+    """Adding a horizon node + pinning shows overlay; unpinning removes it."""
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    survey_item = _find_first_survey_item(win.tree)
+    win.tree.itemDoubleClicked.emit(survey_item, 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Synthetic horizon registered into the project for this test.
+    import numpy as np
+
+    from eggseis.data.horizon import Horizon
+    geom = win.section_viewer.geometry
+    grid = np.full((geom.n_inlines, geom.n_xlines), 50.0, dtype=np.float32)
+    h = Horizon(name="test_top", grid=grid, geometry_ref="x")
+    target = win._project.root / "horizons" / "test_top"
+    h.save(target)
+
+    from eggseis.project import HorizonEntry
+    win._project = win._project.with_horizon_added(
+        HorizonEntry(name="test_top", path=target)
+    )
+    win._canvas.register_horizons([h.name for h in win._project.horizons])
+
+    nid = win._canvas.add_horizon_node("test_top")
+    qtbot.wait(50)  # let signal-driven sync run
+    assert "test_top" in win.section_viewer.horizon_overlay_names()
+
+    win._canvas.set_horizon_pinned(nid, False)
+    qtbot.wait(50)
+    assert "test_top" not in win.section_viewer.horizon_overlay_names()

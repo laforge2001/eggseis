@@ -104,8 +104,16 @@ class MainWindow(QMainWindow):
         # Pre-register every discovered plugin so qtpynodeeditor's
         # right-click "Add Node" menu shows the full library.
         self._canvas.register_specs(discover_all())
-        # Auto-tap any newly added node (covers menu adds and right-click).
-        self._canvas.nodeAdded.connect(lambda nid: self._canvas.set_tap(nid, "out"))
+        # Auto-tap any newly added plugin node (covers menu adds and
+        # right-click). Horizon nodes have no output port and are not
+        # tappable — skip them.
+        self._canvas.nodeAdded.connect(self._on_canvas_node_added)
+
+        # Horizon overlay sync: pin/unpin (overlayChanged), add (nodeAdded),
+        # remove (nodeRemoved) all feed _sync_horizon_overlays.
+        self._canvas.overlayChanged.connect(lambda _nid: self._sync_horizon_overlays())
+        self._canvas.nodeAdded.connect(lambda _nid: self._sync_horizon_overlays())
+        self._canvas.nodeRemoved.connect(lambda _nid: self._sync_horizon_overlays())
 
         # Double-click → modeless params popup. Replaces the previous tap-on-
         # double-click behaviour; tap stays on the right-click context menu.
@@ -717,6 +725,18 @@ class MainWindow(QMainWindow):
         graph.set_params(node_id, params)
         self._request_tap()
 
+    def _on_canvas_node_added(self, node_id: str) -> None:
+        """Auto-tap newly added plugin nodes; horizon nodes are not tappable."""
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        if graph is None or node_id not in graph.nodes:
+            return
+        if graph.nodes[node_id].kind == "horizon":
+            return
+        self._canvas.set_tap(node_id, "out")
+
     def _request_tap(self) -> None:
         volume = self.section_viewer.volume
         if volume is None or self._active_survey_id is None:
@@ -727,6 +747,7 @@ class MainWindow(QMainWindow):
             # show_slice. Skip the executor to avoid stamping a redundant
             # raw overlay.
             self.section_viewer.clear_overlay()
+            self._sync_horizon_overlays()
             return
         # Mid-wiring: the user has tapped a node whose inputs aren't all
         # connected yet. Stay on raw rather than firing a failed signal —
@@ -734,6 +755,7 @@ class MainWindow(QMainWindow):
         tap_node, _ = graph.tap_port
         if not self._cone_fully_wired(graph, tap_node):
             self.section_viewer.clear_overlay()
+            self._sync_horizon_overlays()
             return
         self._executor.request_tap(
             graph,
@@ -741,6 +763,32 @@ class MainWindow(QMainWindow):
             self.section_viewer.current_axis,
             self.section_viewer.current_index,
         )
+        self._sync_horizon_overlays()
+
+    def _sync_horizon_overlays(self) -> None:
+        if self._active_survey_id is None or self._project is None:
+            return
+        graph = self._graphs.get(self._active_survey_id)
+        if graph is None:
+            return
+        visible_ids = set(graph.visible_horizons_for_tap(*graph.tap_port))
+        # Map ids → horizon names via the graph's horizon nodes.
+        visible_names = {
+            graph.nodes[nid].horizon_name for nid in visible_ids
+            if nid in graph.nodes
+            and graph.nodes[nid].kind == "horizon"
+            and graph.nodes[nid].horizon_name is not None
+        }
+        current = set(self.section_viewer.horizon_overlay_names())
+
+        for name in current - visible_names:
+            self.section_viewer.remove_horizon_overlay(name)
+        for name in visible_names - current:
+            try:
+                horizon = self._project.load_horizon(name)
+            except KeyError:
+                continue
+            self.section_viewer.add_horizon_overlay(horizon)
 
     def _cone_fully_wired(self, graph: Graph, tap_node: str) -> bool:
         from eggseis.graph.model import SOURCE_ID as _SRC
