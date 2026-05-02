@@ -86,3 +86,22 @@ def test_set_horizon_pinned_emits_overlay_changed_signal(canvas, qtbot):
     canvas.overlayChanged.connect(received.append)
     canvas.set_horizon_pinned(nid, False)
     assert received == [nid]
+
+
+def test_delete_key_path_removes_horizon(canvas):
+    """Lib's delete_selection action emits node_deleted; canvas must
+    mirror that into Graph state for horizon nodes (not just plugins)."""
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    scene_node = canvas.horizon_scene_node_for(nid)
+    assert scene_node is not None
+
+    # Simulate the lib's delete path: emit node_deleted ourselves.
+    canvas._scene.node_deleted.emit(scene_node)
+
+    assert nid not in g.nodes
+    assert g.associations == []
+    assert nid not in g.pinned_overlays
+    assert canvas.dashed_line_for(nid) is None
+    assert canvas.horizon_scene_node_for(nid) is None

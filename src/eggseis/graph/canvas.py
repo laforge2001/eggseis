@@ -601,13 +601,29 @@ class GraphCanvas(QWidget):
         if self._suppress_signal_sync or self._graph is None:
             return
         if scene_node is self._source_scene_node:
-            return  # Should not happen (Source is locked) — defensive.
-        node_id = self._scene_node_to_graph_id(scene_node)
+            return  # Source is locked against deletion.
+        # Reverse-lookup against both maps; whichever holds the scene_node
+        # is the one we need to clean up.
+        horizon_id = next(
+            (nid for nid, sn in self._horizon_scene_nodes.items() if sn is scene_node),
+            None,
+        )
+        plugin_id = next(
+            (nid for nid, sn in self._scene_nodes.items() if sn is scene_node),
+            None,
+        )
+        node_id = horizon_id or plugin_id
         if node_id is None or node_id == SOURCE_ID:
             return
         if node_id in self._graph.nodes:
             self._graph.remove_node(node_id)
-        self._scene_nodes.pop(node_id, None)
+        if horizon_id is not None:
+            self._horizon_scene_nodes.pop(horizon_id, None)
+            line_item = self._dashed_lines.pop(horizon_id, None)
+            if line_item is not None:
+                self._scene.removeItem(line_item)
+        else:
+            self._scene_nodes.pop(node_id, None)
         self.nodeRemoved.emit(node_id)
         self.edgeChanged.emit()
 
