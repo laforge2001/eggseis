@@ -103,6 +103,8 @@ class Graph:
     nodes: dict[str, Node] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
     tap_port: tuple[str, str] = (SOURCE_ID, "inline")
+    associations: list[Association] = field(default_factory=list)
+    pinned_overlays: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self._undo: list[tuple] = []
@@ -121,6 +123,37 @@ class Graph:
         self.nodes[node.node_id] = node
         self._record(("remove_node", node.node_id))
 
+    def add_horizon_node(
+        self,
+        horizon_name: str,
+        *,
+        pos: tuple[float, float] = (0.0, 0.0),
+    ) -> str:
+        node = Node(
+            spec=None,
+            params=None,
+            kind="horizon",
+            horizon_name=horizon_name,
+            pos=pos,
+        )
+        self.nodes[node.node_id] = node
+        self.associations.append(
+            Association(horizon_node_id=node.node_id, source_node_id=SOURCE_ID)
+        )
+        self.pinned_overlays.add(node.node_id)
+        return node.node_id
+
+    def pin_overlay(self, node_id: str) -> None:
+        node = self.nodes[node_id]
+        if node.kind != "horizon":
+            raise ValueError(
+                f"pin_overlay: node {node_id!r} kind={node.kind!r} (expected horizon)"
+            )
+        self.pinned_overlays.add(node_id)
+
+    def unpin_overlay(self, node_id: str) -> None:
+        self.pinned_overlays.discard(node_id)
+
     def remove_node(self, node_id: str) -> None:
         if node_id == SOURCE_ID:
             raise ValueError("cannot remove implicit Source node")
@@ -129,6 +162,11 @@ class Graph:
         self.edges = [e for e in self.edges if e not in removed_edges]
         if self.tap_port[0] == node_id:
             self.tap_port = (SOURCE_ID, "inline")
+        self.associations = [
+            a for a in self.associations
+            if a.horizon_node_id != node_id and a.source_node_id != node_id
+        ]
+        self.pinned_overlays.discard(node_id)
         self._record(("add_node_full", node, list(removed_edges), self.tap_port))
 
     def connect(self, edge: Edge) -> None:
