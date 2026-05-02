@@ -56,7 +56,7 @@ def test_add_horizon_node_creates_association_and_pins():
     assert nid in g.pinned_overlays
 
 
-def test_remove_horizon_node_drops_association_and_pin(linear_spec):
+def test_remove_horizon_node_drops_association_and_pin():
     g = Graph()
     nid = g.add_horizon_node(horizon_name="top")
     g.remove_node(nid)
@@ -81,3 +81,28 @@ def test_pin_overlay_rejects_plugin_node(linear_spec):
     g.add_node(n)
     with pytest.raises(ValueError, match="horizon"):
         g.pin_overlay(n.node_id)
+
+
+def test_undo_after_add_horizon_node_removes_it():
+    g = Graph()
+    nid = g.add_horizon_node(horizon_name="top")
+    assert nid in g.nodes
+    g.undo()
+    assert nid not in g.nodes
+    assert g.associations == []
+    assert g.pinned_overlays == set()
+
+
+def test_undo_after_remove_horizon_restores_association_and_pin():
+    g = Graph()
+    nid = g.add_horizon_node(horizon_name="top")
+    g.remove_node(nid)
+    g.undo()
+    assert nid in g.nodes
+    assert any(a.horizon_node_id == nid for a in g.associations)
+    assert nid in g.pinned_overlays
+
+
+def test_unpin_overlay_unknown_id_is_silent():
+    g = Graph()
+    g.unpin_overlay("nonexistent-id")  # must not raise

@@ -141,9 +141,18 @@ class Graph:
             Association(horizon_node_id=node.node_id, source_node_id=SOURCE_ID)
         )
         self.pinned_overlays.add(node.node_id)
+        # Inverse: remove the node, drop its association + pin (handled in
+        # remove_node's standard cleanup path via _apply_inverse).
+        self._record(("remove_node", node.node_id))
         return node.node_id
 
     def pin_overlay(self, node_id: str) -> None:
+        """Mark a horizon node as pinned (overlay rendered on the section viewer).
+
+        Raises KeyError if `node_id` is unknown, ValueError if the node is not
+        a horizon kind. Use `unpin_overlay` to remove (idempotent — silent on
+        unknown ids).
+        """
         node = self.nodes[node_id]
         if node.kind != "horizon":
             raise ValueError(
@@ -152,6 +161,8 @@ class Graph:
         self.pinned_overlays.add(node_id)
 
     def unpin_overlay(self, node_id: str) -> None:
+        """Remove a horizon node from the pinned set. Idempotent — silent
+        if the id is unknown or the node was never pinned."""
         self.pinned_overlays.discard(node_id)
 
     def remove_node(self, node_id: str) -> None:
@@ -162,12 +173,26 @@ class Graph:
         self.edges = [e for e in self.edges if e not in removed_edges]
         if self.tap_port[0] == node_id:
             self.tap_port = (SOURCE_ID, "inline")
+        removed_associations = [
+            a for a in self.associations
+            if a.horizon_node_id == node_id or a.source_node_id == node_id
+        ]
         self.associations = [
             a for a in self.associations
             if a.horizon_node_id != node_id and a.source_node_id != node_id
         ]
+        was_pinned = node_id in self.pinned_overlays
         self.pinned_overlays.discard(node_id)
-        self._record(("add_node_full", node, list(removed_edges), self.tap_port))
+        self._record(
+            (
+                "add_node_full",
+                node,
+                list(removed_edges),
+                self.tap_port,
+                removed_associations,
+                was_pinned,
+            )
+        )
 
     def connect(self, edge: Edge) -> None:
         self._validate_edge(edge)
@@ -420,12 +445,16 @@ class Graph:
             "nodes": {nid: copy.copy(n) for nid, n in self.nodes.items()},
             "edges": list(self.edges),
             "tap_port": self.tap_port,
+            "associations": list(self.associations),
+            "pinned_overlays": set(self.pinned_overlays),
         }
 
     def _restore(self, snap: dict) -> None:
         self.nodes = {nid: copy.copy(n) for nid, n in snap["nodes"].items()}
         self.edges = list(snap["edges"])
         self.tap_port = snap["tap_port"]
+        self.associations = list(snap.get("associations", []))
+        self.pinned_overlays = set(snap.get("pinned_overlays", set()))
 
     def _apply_inverse(self, op: tuple) -> None:
         kind = op[0]
@@ -435,12 +464,25 @@ class Graph:
                 e for e in self.edges
                 if e.src_node_id != op[1] and e.dst_node_id != op[1]
             ]
+            # Drop any association referencing this node + any pin entry.
+            self.associations = [
+                a for a in self.associations
+                if a.horizon_node_id != op[1] and a.source_node_id != op[1]
+            ]
+            self.pinned_overlays.discard(op[1])
         elif kind == "add_node_full":
             node, edges, tap = op[1], op[2], op[3]
             self.nodes[node.node_id] = copy.copy(node)
             for e in edges:
                 self.edges.append(e)
             self.tap_port = tap
+            # Restore associations + pin (Task 2 horizon support; older tuples
+            # without these fields skip silently).
+            if len(op) >= 5:
+                for a in op[4]:
+                    self.associations.append(a)
+            if len(op) >= 6 and op[5]:
+                self.pinned_overlays.add(node.node_id)
         elif kind == "disconnect_full":
             edge, prior = op[1], op[2]
             if edge in self.edges:
