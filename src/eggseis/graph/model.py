@@ -54,8 +54,15 @@ class OrphanHorizonError(KeyError):
 
 @dataclass(frozen=True)
 class Association:
+    """Dashed-reference link from a horizon node to its bound Source.
+
+    v1.0 has only the implicit Source so source_node_id defaults to SOURCE_ID.
+    Multi-source graphs (M7+) will let a single project carry multiple Sources;
+    each horizon associates with exactly one of them.
+    """
+
     horizon_node_id: str
-    source_node_id: str = SOURCE_ID  # v1.0 has only the implicit Source
+    source_node_id: str = SOURCE_ID
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,20 @@ class Node:
     node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     kind: Literal["plugin", "horizon"] = "plugin"
     horizon_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "plugin":
+            if self.spec is None:
+                raise ValueError("plugin nodes require a spec")
+            if self.horizon_name is not None:
+                raise ValueError("plugin nodes must not set horizon_name")
+        elif self.kind == "horizon":
+            if self.horizon_name is None:
+                raise ValueError("horizon nodes require horizon_name")
+            if self.spec is not None or self.params is not None:
+                raise ValueError("horizon nodes must not set spec or params")
+        else:
+            raise ValueError(f"unknown Node kind {self.kind!r}")
 
 
 @dataclass
