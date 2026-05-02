@@ -175,3 +175,34 @@ def test_orphan_horizon_on_load_raises(linear_spec):
     d = g.to_dict()
     with pytest.raises(OrphanHorizonError, match="missing"):
         Graph.from_dict(d, plugins={linear_spec.id: linear_spec}, horizons={})
+
+
+def test_from_dict_round_trip_with_mixed_graph(linear_spec):
+    """Round-trip a graph carrying plugin nodes + edges + horizon nodes
+    + associations + pinned overlays. Everything survives."""
+    from eggseis.graph.model import Edge
+
+    g = Graph()
+    plugin_node = Node(spec=linear_spec, params=linear_spec.param_model(scale=2.0))
+    g.add_node(plugin_node)
+    g.connect(Edge(SOURCE_ID, "inline", plugin_node.node_id, "traces"))
+    g.set_tap(plugin_node.node_id)
+    horizon_id = g.add_horizon_node(horizon_name="top")
+
+    d = g.to_dict()
+    rebuilt = Graph.from_dict(
+        d,
+        plugins={linear_spec.id: linear_spec},
+        horizons={"top": object()},
+    )
+
+    assert plugin_node.node_id in rebuilt.nodes
+    assert rebuilt.nodes[plugin_node.node_id].kind == "plugin"
+    assert rebuilt.nodes[plugin_node.node_id].params.scale == 2.0
+    assert horizon_id in rebuilt.nodes
+    assert rebuilt.nodes[horizon_id].kind == "horizon"
+    assert len(rebuilt.edges) == 1
+    assert rebuilt.tap_port == (plugin_node.node_id, "out")
+    assert len(rebuilt.associations) == 1
+    assert rebuilt.associations[0].horizon_node_id == horizon_id
+    assert rebuilt.pinned_overlays == {horizon_id}

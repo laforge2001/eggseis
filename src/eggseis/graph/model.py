@@ -564,7 +564,7 @@ class Graph:
                 {"horizon_node_id": a.horizon_node_id, "source_node_id": a.source_node_id}
                 for a in self.associations
             ],
-            "pinned_overlays": list(self.pinned_overlays),
+            "pinned_overlays": sorted(self.pinned_overlays),
         }
 
     @classmethod
