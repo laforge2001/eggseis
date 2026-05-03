@@ -156,7 +156,15 @@ class GraphCanvas(QWidget):
         layout.addWidget(self._view)
 
         self._registry.register_model(_SourceModel, category="eggseis")
+        # Register _HorizonModel so scene.create_node(_HorizonModel) works (the
+        # lib's create() requires a registered creator), then drop it from the
+        # category-association map so it does NOT appear in the lib's
+        # right-click "Add Node" menu. Surfacing it there spawns a horizon
+        # node with no associated horizon name, which is unusable.
         self._registry.register_model(_HorizonModel, category="eggseis")
+        self._registry.registered_models_category_association().pop(
+            _HorizonModel.name, None
+        )
         self._scene.connection_created.connect(self._on_lib_connection_created)
         self._scene.connection_deleted.connect(self._on_lib_connection_deleted)
         self._scene.selectionChanged.connect(self._on_scene_selection_changed)

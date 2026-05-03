@@ -5,20 +5,26 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMenu, QTreeWidget, QTreeWidgetItem
 
 from eggseis.project import Project
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
+_HORIZON_NAME_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class ProjectTreeWidget(QTreeWidget):
     surveyActivated = Signal(Path)
+    horizonActivated = Signal(str)
+    loadRequested = Signal(str)  # category name: "survey", "horizon", or "well"
 
     def __init__(self) -> None:
         super().__init__()
         self.setHeaderLabel("Project")
         self.itemDoubleClicked.connect(self._on_double_click)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
 
     def set_project(self, project: Project) -> None:
         self.clear()
@@ -30,12 +36,14 @@ class ProjectTreeWidget(QTreeWidget):
             surveys.addChild(item)
         root.addChild(surveys)
 
-        horizons = QTreeWidgetItem([f"Horizons ({len(project.horizons)})"])
+        horizons = QTreeWidgetItem(["Horizons"])
         for h in project.horizons:
-            horizons.addChild(QTreeWidgetItem([h.name]))
+            item = QTreeWidgetItem([h.name])
+            item.setData(0, _HORIZON_NAME_ROLE, h.name)
+            horizons.addChild(item)
         root.addChild(horizons)
 
-        wells = QTreeWidgetItem([f"Wells ({len(project.wells)})"])
+        wells = QTreeWidgetItem(["Wells"])
         for w in project.wells:
             wells.addChild(QTreeWidgetItem([w.name]))
         root.addChild(wells)
@@ -50,3 +58,24 @@ class ProjectTreeWidget(QTreeWidget):
         path_str = item.data(0, _PATH_ROLE)
         if path_str:
             self.surveyActivated.emit(Path(path_str))
+            return
+        horizon_name = item.data(0, _HORIZON_NAME_ROLE)
+        if horizon_name:
+            self.horizonActivated.emit(str(horizon_name))
+
+    def _on_context_menu(self, pos) -> None:
+        item = self.itemAt(pos)
+        if item is None:
+            return
+        text = item.text(0)
+        category_map = {"Surveys": "survey", "Horizons": "horizon", "Wells": "well"}
+        category = category_map.get(text)
+        if category is None:
+            return
+        menu = QMenu(self)
+        action = QAction("Load…", self)
+        action.triggered.connect(
+            lambda _checked=False, c=category: self.loadRequested.emit(c)
+        )
+        menu.addAction(action)
+        menu.exec_(self.mapToGlobal(pos))

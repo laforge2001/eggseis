@@ -235,9 +235,42 @@ class MainWindow(QMainWindow):
 
     def _wire_signals(self) -> None:
         self.tree.surveyActivated.connect(self.open_survey)
+        self.tree.horizonActivated.connect(self._on_horizon_activated)
+        self.tree.loadRequested.connect(self._on_tree_load_requested)
         self.slice_nav.sliceChanged.connect(self._on_slice_changed)
         self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
         self.param_dock.paramsChanged.connect(self._on_params_changed)
+
+    def _on_horizon_activated(self, name: str) -> None:
+        if self._active_survey_id is None:
+            QMessageBox.information(
+                self, "Load Horizon",
+                "Open a survey first, then double-click a horizon to add it."
+            )
+            return
+        if self._project is None:
+            return
+        graph = self._graphs.get(self._active_survey_id)
+        if graph is None:
+            return
+        for node in graph.nodes.values():
+            if node.kind == "horizon" and node.horizon_name == name:
+                return  # already on canvas
+        # add_horizon_node auto-pins via Graph.add_horizon_node and the
+        # nodeAdded signal triggers _sync_horizon_overlays.
+        self._canvas.add_horizon_node(name)
+
+    def _on_tree_load_requested(self, category: str) -> None:
+        if category == "horizon":
+            self._on_import_horizon()
+        elif category == "well":
+            self._on_import_well()
+        elif category == "survey":
+            QMessageBox.information(
+                self, "Load Survey",
+                "Survey import via the project tree is not yet available. "
+                "Add survey paths to the project's project.yaml manually."
+            )
 
     @property
     def project(self) -> Project | None:

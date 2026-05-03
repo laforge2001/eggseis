@@ -88,6 +88,28 @@ def test_set_horizon_pinned_emits_overlay_changed_signal(canvas, qtbot):
     assert received == [nid]
 
 
+def test_horizon_model_hidden_from_lib_right_click_menu(canvas):
+    """The lib's 'Add Node' menu groups by registered category. _HorizonModel
+    must NOT appear there — adding it through the lib menu produces an
+    unusable disconnected horizon node with no associated horizon name.
+
+    The fix: register the model so scene.create_node still works, but drop
+    it from the registry's category-association map (which the menu reads).
+    """
+    cat_map = canvas._registry.registered_models_category_association()
+    assert "Horizon" not in cat_map, (
+        "Horizon should be hidden from the lib's right-click 'Add Node' menu"
+    )
+    # And scene.create_node(_HorizonModel) must still succeed (used by
+    # add_horizon_node) — exercise it indirectly via the public path.
+    from eggseis.graph.model import Graph
+
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("h1")
+    assert nid in g.nodes
+
+
 def test_delete_key_path_removes_horizon(canvas):
     """Lib's delete_selection action emits node_deleted; canvas must
     mirror that into Graph state for horizon nodes (not just plugins)."""
