@@ -211,6 +211,46 @@ def test_opendtect_ascii_handles_three_column_input(tmp_path):
     np.testing.assert_array_equal(h.grid, np.array([[55.0, 55.7]], dtype=np.float32))
 
 
+def test_import_xyz_csv_autodetect_finds_bounds(tmp_path):
+    """Auto-detect importer infers inline/xline bounds from the CSV data
+    and builds a tightly fitted grid (step assumed 1)."""
+    from eggseis.data.horizon import import_xyz_csv_autodetect
+
+    csv = tmp_path / "horizon.csv"
+    csv.write_text(
+        "inline,xline,time\n"
+        "100,300,55.0\n"
+        "100,302,55.7\n"
+        "102,300,56.5\n"
+        "102,302,57.2\n"
+    )
+    h = import_xyz_csv_autodetect(
+        csv,
+        name="top",
+        geometry_ref="(detached)",
+    )
+    assert h.inline_min == 100
+    assert h.xline_min == 300
+    assert h.inline_step == 1
+    assert h.xline_step == 1
+    # Bounds: inline 100-102 => 3 inlines; xline 300-302 => 3 xlines.
+    assert h.grid.shape == (3, 3)
+    assert h.grid[0, 0] == pytest.approx(55.0)
+    assert h.grid[2, 2] == pytest.approx(57.2)
+    # Cells with no sample stay NaN.
+    assert np.isnan(h.grid[1, 1])
+    assert h.geometry_ref == "(detached)"
+
+
+def test_import_xyz_csv_autodetect_empty_raises(tmp_path):
+    from eggseis.data.horizon import import_xyz_csv_autodetect
+
+    csv = tmp_path / "horizon.csv"
+    csv.write_text("inline,xline,time\n")
+    with pytest.raises(ValueError, match="no data rows"):
+        import_xyz_csv_autodetect(csv, name="top", geometry_ref="x")
+
+
 def test_save_creates_parent_directories(tmp_path):
     from eggseis.data.horizon import Horizon
 

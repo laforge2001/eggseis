@@ -113,3 +113,40 @@ def test_horizon_overlay_names_returns_keys(qtbot, fake_backend):
     viewer.set_volume(vol)
     viewer.add_horizon_overlay(_horizon_for(vol.geometry))
     assert viewer.horizon_overlay_names() == ["top"]
+
+
+def test_show_warning_makes_label_visible(qtbot):
+    from eggseis.viewers.section import SectionViewer
+
+    viewer = SectionViewer()
+    qtbot.addWidget(viewer)
+    viewer.show()
+    qtbot.waitExposed(viewer)
+    viewer.show_warning("2 horizon(s) not visible: no survey loaded")
+    assert viewer._status_label.isVisible() is True
+    assert "no survey loaded" in viewer._status_label.text()
+
+
+def test_clear_warning_hides_label(qtbot):
+    from eggseis.viewers.section import SectionViewer
+
+    viewer = SectionViewer()
+    qtbot.addWidget(viewer)
+    viewer.show()
+    qtbot.waitExposed(viewer)
+    viewer.show_warning("anything")
+    viewer.clear_warning()
+    assert viewer._status_label.isVisible() is False
+    assert viewer._status_label.text() == ""
+
+
+def test_show_warning_with_empty_text_hides(qtbot):
+    from eggseis.viewers.section import SectionViewer
+
+    viewer = SectionViewer()
+    qtbot.addWidget(viewer)
+    viewer.show()
+    qtbot.waitExposed(viewer)
+    viewer.show_warning("first")
+    viewer.show_warning("")
+    assert viewer._status_label.isVisible() is False

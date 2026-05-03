@@ -155,6 +155,47 @@ def import_opendtect_ascii(
     )
 
 
+def import_xyz_csv_autodetect(
+    path: str | Path,
+    *,
+    name: str,
+    geometry_ref: str,
+    color: str = DEFAULT_COLOR,
+) -> Horizon:
+    """Import an XYZ CSV without a known survey geometry.
+
+    Auto-detects inline_min/max and xline_min/max from the CSV's data;
+    inline_step and xline_step assumed 1 (the common case for CSV exports).
+    Useful for project-only horizon import before a compatible survey is opened.
+    """
+    rows = []
+    with Path(path).open() as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append((int(row["inline"]), int(row["xline"]), float(row["time"])))
+    if not rows:
+        raise ValueError(f"CSV {path} has no data rows")
+    inlines = [r[0] for r in rows]
+    xlines = [r[1] for r in rows]
+    inline_min, inline_max = min(inlines), max(inlines)
+    xline_min, xline_max = min(xlines), max(xlines)
+    n_inlines = inline_max - inline_min + 1
+    n_xlines = xline_max - xline_min + 1
+    grid = np.full((n_inlines, n_xlines), np.nan, dtype=np.float32)
+    for inline, xline, time in rows:
+        grid[inline - inline_min, xline - xline_min] = time
+    return Horizon(
+        name=name,
+        grid=grid,
+        geometry_ref=geometry_ref,
+        color=color,
+        inline_min=inline_min,
+        xline_min=xline_min,
+        inline_step=1,
+        xline_step=1,
+    )
+
+
 def import_xyz_csv(
     path: str | Path,
     *,

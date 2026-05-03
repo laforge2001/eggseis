@@ -32,6 +32,7 @@ from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
 from eggseis.plugin_template import create_template, open_in_editor
 from eggseis.project import Project
+from eggseis.viewers.map_view import MapViewWidget
 from eggseis.viewers.section import DEFAULT_LUT, SectionViewer
 from eggseis.widgets.param_dock import ParamDock
 from eggseis.widgets.project_tree import ProjectTreeWidget
@@ -49,14 +50,18 @@ class MainWindow(QMainWindow):
         self.tree = ProjectTreeWidget()
         self.section_viewer = SectionViewer()
         self.slice_nav = SliceNavigator()
+        self.map_view = MapViewWidget()
         self.param_dock = ParamDock()  # Legacy single-attribute param editor.
 
         # Three-pane layout:
-        #   tree (far left) | section viewer + slice nav (center) | graph canvas (right)
+        #   tree (far left) | section viewer + slice nav + map view (center) | graph canvas (right)
         viewer_pane = QSplitter(Qt.Vertical)
         viewer_pane.addWidget(self.section_viewer)
         viewer_pane.addWidget(self.slice_nav)
-        viewer_pane.setStretchFactor(0, 1)
+        viewer_pane.addWidget(self.map_view)
+        viewer_pane.setStretchFactor(0, 3)  # section gets most height
+        viewer_pane.setStretchFactor(1, 0)  # nav fixed
+        viewer_pane.setStretchFactor(2, 1)  # map gets ~25%
 
         self._canvas = GraphCanvas()
 
@@ -240,6 +245,9 @@ class MainWindow(QMainWindow):
         self.slice_nav.sliceChanged.connect(self._on_slice_changed)
         self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
         self.param_dock.paramsChanged.connect(self._on_params_changed)
+        self.map_view.sliceRequested.connect(
+            lambda axis, idx: self.slice_nav.set_axis_and_index(axis, idx)
+        )
 
     def _on_horizon_activated(self, name: str) -> None:
         if self._active_survey_id is None:
@@ -358,6 +366,7 @@ class MainWindow(QMainWindow):
                 self._graphs.setdefault(survey_id, Graph())
                 self.section_viewer.set_volume(volume)
                 self.slice_nav.set_geometry(volume.geometry)
+                self.map_view.set_volume(volume)
                 self._canvas.bind(self._graphs[survey_id])
                 if self._project is not None:
                     self._canvas.register_horizons(
@@ -411,6 +420,7 @@ class MainWindow(QMainWindow):
         # active, recompute. The graph-driven path takes precedence over
         # the menu-driven single-attribute path so we don't paint twice.
         self.section_viewer.show_slice(axis, index)
+        self.map_view.show_slice(axis, index)
         graph = (
             self._graphs.get(self._active_survey_id)
             if self._active_survey_id else None
@@ -472,13 +482,12 @@ class MainWindow(QMainWindow):
         return self._canvas.add_plugin(spec)
 
     def _on_import_horizon(self) -> None:
-        from eggseis.data.horizon import import_xyz_csv
+        from eggseis.data.horizon import import_xyz_csv, import_xyz_csv_autodetect
 
-        if self._active_survey_id is None:
+        if self._project is None:
             QMessageBox.information(
                 self, "Import Horizon",
-                "Open a survey first (double-click one in the project tree), "
-                "then re-run this action."
+                "Open a project first."
             )
             return
         path, _ = QFileDialog.getOpenFileName(
@@ -486,38 +495,44 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        geom = self.section_viewer.geometry
         try:
-            horizon = import_xyz_csv(
-                Path(path),
-                name=Path(path).stem,
-                inline_min=geom.inline_min, n_inlines=geom.n_inlines,
-                inline_step=geom.inline_step,
-                xline_min=geom.xline_min, n_xlines=geom.n_xlines,
-                xline_step=geom.xline_step,
-                geometry_ref=str(self._active_survey_id),
-            )
+            if self._active_survey_id is not None:
+                geom = self.section_viewer.geometry
+                horizon = import_xyz_csv(
+                    Path(path),
+                    name=Path(path).stem,
+                    inline_min=geom.inline_min, n_inlines=geom.n_inlines,
+                    inline_step=geom.inline_step,
+                    xline_min=geom.xline_min, n_xlines=geom.n_xlines,
+                    xline_step=geom.xline_step,
+                    geometry_ref=str(self._active_survey_id),
+                )
+            else:
+                horizon = import_xyz_csv_autodetect(
+                    Path(path),
+                    name=Path(path).stem,
+                    geometry_ref="(detached)",
+                )
         except Exception as exc:
             QMessageBox.critical(self, "Import failed", str(exc))
             return
-        self.section_viewer.add_horizon_overlay(horizon)
-        # Persist + register in the project model so the tree reflects it.
-        if self._project is not None:
-            from eggseis.project import HorizonEntry
-            target_dir = self._project.root / "horizons" / horizon.name
-            try:
-                horizon.save(target_dir)
-            except Exception as exc:
-                QMessageBox.warning(self, "Horizon save failed", str(exc))
-            else:
-                entry = HorizonEntry(
-                    name=horizon.name, path=target_dir, color=horizon.color
-                )
-                self._project = self._project.with_horizon_added(entry)
-                self.tree.set_project(self._project)
-                self._canvas.register_horizons(
-                    [h.name for h in self._project.horizons]
-                )
+
+        # Persist to disk + register in project + refresh tree.
+        from eggseis.project import HorizonEntry
+        target_dir = self._project.root / "horizons" / horizon.name
+        try:
+            horizon.save(target_dir)
+        except Exception as exc:
+            QMessageBox.warning(self, "Horizon save failed", str(exc))
+            return
+        entry = HorizonEntry(name=horizon.name, path=target_dir, color=horizon.color)
+        self._project = self._project.with_horizon_added(entry)
+        self.tree.set_project(self._project)
+        self._canvas.register_horizons([h.name for h in self._project.horizons])
+
+        # If a survey is active, also drop the overlay onto the section viewer.
+        if self._active_survey_id is not None:
+            self.section_viewer.add_horizon_overlay(horizon)
         self.statusBar().showMessage(f"Imported horizon {horizon.name}", 3000)
 
     def _on_import_well(self) -> None:
@@ -822,6 +837,29 @@ class MainWindow(QMainWindow):
             except KeyError:
                 continue
             self.section_viewer.add_horizon_overlay(horizon)
+
+        # Surface "horizon not visible" reasons.
+        if not visible_names:
+            pinned_count = sum(
+                1 for nid in graph.pinned_overlays
+                if nid in graph.nodes and graph.nodes[nid].kind == "horizon"
+            )
+            if pinned_count > 0:
+                reason = self._horizon_invisible_reason(graph)
+                self.section_viewer.show_warning(
+                    f"{pinned_count} horizon(s) not visible: {reason}"
+                )
+            else:
+                self.section_viewer.clear_warning()
+        else:
+            self.section_viewer.clear_warning()
+
+    def _horizon_invisible_reason(self, graph) -> str:
+        if self._active_survey_id is None:
+            return "no survey loaded"
+        if self.section_viewer.current_axis == "timeslice":
+            return "timeslice axis (no polyline rendering yet)"
+        return "out of section range"
 
     def _cone_fully_wired(self, graph: Graph, tap_node: str) -> bool:
         from eggseis.graph.model import SOURCE_ID as _SRC

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from eggseis.axes import Axis
 from eggseis.colormaps import get_lut
@@ -37,6 +37,14 @@ class SectionViewer(QWidget):
         self._plot.addItem(self._image)
         self._vb = self._plot.getPlotItem().vb
         layout.addWidget(self._plot)
+
+        # Transient warning banner for "horizon not visible" / similar UX hints.
+        self._status_label = QLabel("")
+        self._status_label.setStyleSheet(
+            "QLabel { color: #aa6600; padding: 2px 6px; font-size: 11px; }"
+        )
+        self._status_label.setVisible(False)
+        layout.addWidget(self._status_label)
 
         self._volume: SeismicVolume | None = None
         self._lut_name = DEFAULT_LUT
@@ -210,6 +218,19 @@ class SectionViewer(QWidget):
     def set_colormap(self, name: str) -> None:
         self._lut_name = name
         self._image.setLookupTable(get_lut(name))
+
+    # --- transient warning banner ----------------------------------------
+
+    def show_warning(self, text: str) -> None:
+        if not text:
+            self._status_label.setVisible(False)
+            return
+        self._status_label.setText(text)
+        self._status_label.setVisible(True)
+
+    def clear_warning(self) -> None:
+        self._status_label.setVisible(False)
+        self._status_label.setText("")
 
     def _render(self) -> None:
         if self._volume is None:
