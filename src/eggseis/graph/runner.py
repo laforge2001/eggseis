@@ -135,9 +135,14 @@ def export_volume_with_graph(
     matches the source volume.
 
     `on_progress(done, total)` fires after each inline is processed.
+
+    Streaming write: the zarr store metadata is created up-front via
+    `to_zarr(compute=False)`, then each inline section is written as a
+    region update. Memory usage is bounded by one section at a time
+    (n_xlines * n_samples * 4 bytes ~= 6 MB for a 1k x 1.5k section)
+    regardless of survey size.
     """
     import xarray as xr
-    from mdio import to_mdio
 
     out_path = Path(out_path).expanduser()
     if out_path.exists():
@@ -159,14 +164,7 @@ def export_volume_with_graph(
         geometry.xline_step,
         dtype=np.int32,
     )
-    time_axis = (np.arange(geometry.n_samples, dtype=np.float32) * geometry.sample_rate_ms)
-
-    n_bytes = geometry.n_inlines * geometry.n_xlines * geometry.n_samples * 4
-    if n_bytes > 8 * 1024 ** 3:  # 8 GB
-        raise MemoryError(
-            f"Export would allocate {n_bytes / 1024**3:.1f} GB in RAM "
-            "(in-memory cube cap is 8 GB). Streaming export is on the M7+ roadmap."
-        )
+    time_axis = np.arange(geometry.n_samples, dtype=np.float32) * geometry.sample_rate_ms
 
     # Topology is invariant across inline index; resolve cone once.
     tap_node, tap_port = graph.tap_port
@@ -175,22 +173,55 @@ def export_volume_with_graph(
     else:
         cone = graph.upstream_cone(tap_node, tap_port)
 
-    cube = np.empty(
-        (geometry.n_inlines, geometry.n_xlines, geometry.n_samples), dtype=np.float32
+    # Initialise the empty zarr store (metadata only, no data) sized for
+    # the full survey with chunking aligned to per-inline writes.
+    placeholder = xr.Dataset(
+        data_vars={
+            "amplitude": (
+                ("inline", "crossline", "time"),
+                np.empty(
+                    (geometry.n_inlines, geometry.n_xlines, geometry.n_samples),
+                    dtype=np.float32,
+                ),
+            )
+        },
+        coords={"inline": inline_axis, "crossline": xline_axis, "time": time_axis},
+        attrs={"defaultVariableName": "amplitude"},
     )
+    placeholder.coords["time"].attrs["units"] = "ms"
+    placeholder.to_zarr(
+        str(out_path),
+        mode="w",
+        compute=False,  # only writes metadata, not data
+        encoding={
+            "amplitude": {
+                "chunks": (1, geometry.n_xlines, geometry.n_samples),
+            }
+        },
+    )
+
     total = geometry.n_inlines
     for k, inline in enumerate(inline_axis):
         section = run_graph_on_section(
             graph, volume, Axis.INLINE, int(inline), cone=cone
+        ).astype(np.float32, copy=False)
+        slice_ds = xr.Dataset(
+            data_vars={
+                "amplitude": (
+                    ("inline", "crossline", "time"),
+                    section[np.newaxis, :, :],
+                ),
+            },
+            coords={
+                "inline": [int(inline)],
+                "crossline": xline_axis,
+                "time": time_axis,
+            },
+        ).drop_vars(["crossline", "time"])
+        slice_ds.to_zarr(
+            str(out_path),
+            mode="r+",
+            region={"inline": slice(k, k + 1)},
         )
-        cube[k] = section.astype(np.float32, copy=False)
         if on_progress is not None:
             on_progress(k + 1, total)
-
-    ds = xr.Dataset(
-        data_vars={"amplitude": (("inline", "crossline", "time"), cube)},
-        coords={"inline": inline_axis, "crossline": xline_axis, "time": time_axis},
-        attrs={"defaultVariableName": "amplitude"},
-    )
-    ds.coords["time"].attrs["units"] = "ms"
-    to_mdio(ds, str(out_path), mode="w")
