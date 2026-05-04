@@ -18,6 +18,10 @@ from pathlib import Path
 import numpy as np
 
 
+class LasImportError(ValueError):
+    """LAS file could not be imported. Wraps lasio errors with context."""
+
+
 @dataclass
 class Well:
     name: str
@@ -131,29 +135,59 @@ def import_las(
     milliseconds. For depth-domain LAS files the result will plot at the
     wrong y-position; convert to TWT before import (v1.1 will handle this
     in-app).
+
+    Tolerant of common malformations:
+    - DEPT / MD / DEPTH / TVD as the depth axis (case-insensitive,
+      whitespace-stripped).
+    - NULL value sniffed from the ~Well block; defaults to -999.25 if absent.
+    - NULL detection uses np.isclose so precision-drifted values still
+      convert to NaN.
+
+    Raises LasImportError(path, original_exc) on parse failure.
     """
     import lasio
 
-    las = lasio.read(str(path))
+    p = Path(path)
+    try:
+        las = lasio.read(str(p))
+    except Exception as exc:
+        raise LasImportError(f"{p}: {exc!r}") from exc
+
+    # Find the depth curve, case-insensitive + whitespace-stripped.
+    depth_aliases = {"DEPT", "MD", "DEPTH", "TVD"}
     md_curve = None
-    for candidate in ("DEPT", "MD", "DEPTH"):
-        if candidate in las.curves:
-            md_curve = candidate
+    for curve in las.curves:
+        mnem = (curve.mnemonic or "").strip().upper()
+        if mnem in depth_aliases:
+            md_curve = curve.mnemonic
             break
     if md_curve is None:
-        raise ValueError(
-            f"LAS file {path} has no DEPT / MD / DEPTH curve — cannot infer MD axis"
+        raise LasImportError(
+            f"{p}: no depth curve found (looked for DEPT, MD, DEPTH, TVD)"
         )
 
     md = np.asarray(las[md_curve], dtype=np.float32)
-    null = float(las.well["NULL"].value) if "NULL" in las.well else -999.25
+    null = -999.25
+    try:
+        if "NULL" in las.well:
+            null = float(las.well["NULL"].value)
+    except (KeyError, TypeError, ValueError):
+        pass
+
     logs: dict[str, np.ndarray] = {}
     for curve in las.curves:
         if curve.mnemonic == md_curve:
             continue
-        values = np.asarray(las[curve.mnemonic], dtype=np.float32)
-        values = np.where(values == null, np.nan, values)
-        logs[curve.mnemonic] = values
+        try:
+            values = np.asarray(las[curve.mnemonic], dtype=np.float32)
+        except Exception:
+            continue  # tolerate unreadable curves
+        # Use isclose so precision-drifted NULL values still become NaN.
+        values = np.where(np.isclose(values, null, atol=1e-3), np.nan, values)
+        # Strip any leading/trailing whitespace from the mnemonic key.
+        key = (curve.mnemonic or "").strip()
+        if key:
+            logs[key] = values
 
     deviation = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
     return Well(name=name, deviation=deviation, logs=logs, surface_xy=surface_xy)

@@ -111,3 +111,84 @@ def test_las_importer_null_values_become_nan(tmp_path):
     assert gr[0] == pytest.approx(55.0)
     assert np.isnan(gr[1])
     assert gr[2] == pytest.approx(71.0)
+
+
+def test_las_importer_raises_on_unreadable_file(tmp_path):
+    """Garbage input becomes LasImportError, not a raw lasio exception."""
+    from eggseis.data.well import LasImportError, import_las
+
+    f = tmp_path / "broken.las"
+    f.write_text("this is not a LAS file at all\nrandom text\n")
+    with pytest.raises(LasImportError):
+        import_las(f, name="x", surface_xy=(0.0, 0.0))
+
+
+def test_las_importer_handles_drifted_null_values(tmp_path):
+    """NULL=-999.25 should match -999.250001 via np.isclose."""
+    from eggseis.data.well import import_las
+
+    f = tmp_path / "drifted.las"
+    f.write_text(
+        "~V\nVERS. 2.0:\nWRAP. NO:\n"
+        "~W\nSTRT.M 0.0:\nSTOP.M 100.0:\nSTEP.M 50.0:\nNULL. -999.25:\n"
+        "WELL. DRIFT:\n"
+        "~C\nDEPT.M:\nGR.GAPI:\n"
+        "~A\n"
+        "0.0   55.0\n"
+        "50.0  -999.250001\n"
+        "100.0 60.0\n"
+    )
+    well = import_las(f, name="DRIFT", surface_xy=(0.0, 0.0))
+    gr = well.logs["GR"]
+    assert np.isnan(gr[1])
+    assert gr[0] == pytest.approx(55.0)
+    assert gr[2] == pytest.approx(60.0)
+
+
+def test_las_importer_uses_md_when_dept_missing(tmp_path):
+    """Some LAS files use MD as the depth mnemonic instead of DEPT."""
+    from eggseis.data.well import import_las
+
+    f = tmp_path / "md.las"
+    f.write_text(
+        "~V\nVERS. 2.0:\nWRAP. NO:\n"
+        "~W\nSTRT.M 0.0:\nSTOP.M 100.0:\nSTEP.M 50.0:\n"
+        "WELL. MDONLY:\n"
+        "~C\nMD.M:\nGR.GAPI:\n"
+        "~A\n"
+        "0.0   55.0\n"
+        "50.0  60.0\n"
+        "100.0 65.0\n"
+    )
+    well = import_las(f, name="MDONLY", surface_xy=(0.0, 0.0))
+    assert well.deviation.shape == (3, 3)
+    np.testing.assert_array_equal(well.deviation[:, 0], [0.0, 50.0, 100.0])
+
+
+def test_las_importer_no_depth_curve_raises(tmp_path):
+    from eggseis.data.well import LasImportError, import_las
+
+    f = tmp_path / "nodepth.las"
+    f.write_text(
+        "~V\nVERS. 2.0:\nWRAP. NO:\n"
+        "~W\nSTRT.M 0.0:\nSTOP.M 100.0:\nSTEP.M 50.0:\n"
+        "WELL. NODEPTH:\n"
+        "~C\nGR.GAPI:\n~A\n55.0\n60.0\n65.0\n"
+    )
+    with pytest.raises(LasImportError, match="depth curve"):
+        import_las(f, name="x", surface_xy=(0.0, 0.0))
+
+
+def test_las_importer_uppercase_lowercase_dept(tmp_path):
+    """`dept` (lowercase) should match the same alias set as DEPT."""
+    from eggseis.data.well import import_las
+
+    f = tmp_path / "lower.las"
+    f.write_text(
+        "~V\nVERS. 2.0:\nWRAP. NO:\n"
+        "~W\nSTRT.M 0.0:\nSTOP.M 100.0:\nSTEP.M 50.0:\n"
+        "WELL. LOWER:\n"
+        "~C\ndept.M:\nGR.GAPI:\n~A\n0.0  55.0\n50.0  60.0\n100.0  65.0\n"
+    )
+    well = import_las(f, name="x", surface_xy=(0.0, 0.0))
+    assert well.deviation.shape == (3, 3)
