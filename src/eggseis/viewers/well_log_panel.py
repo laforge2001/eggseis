@@ -8,6 +8,8 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QLabel, QVBoxLayout, QWidget
 
 from eggseis.data.well import Well
+from eggseis.viewers.theme import apply_to_plot_widget
+from eggseis.viewers.theme import colors as _theme_colors
 
 
 class WellLogPanel(QWidget):
@@ -27,7 +29,10 @@ class WellLogPanel(QWidget):
         layout.setContentsMargins(2, 2, 2, 2)
 
         self._title = QLabel("Well: (none)")
-        self._title.setStyleSheet("QLabel { font-size: 11px; padding: 2px; }")
+        self._title.setStyleSheet(
+            f"QLabel {{ color: {_theme_colors()['foreground']}; "
+            f"font-size: 11px; padding: 2px; }}"
+        )
         layout.addWidget(self._title)
 
         self._curve_picker = QComboBox()
@@ -35,7 +40,7 @@ class WellLogPanel(QWidget):
         layout.addWidget(self._curve_picker)
 
         self._plot = pg.PlotWidget()
-        self._plot.setBackground("w")
+        apply_to_plot_widget(self._plot)
         self._plot.invertY(True)  # match section viewer (time grows downward)
         self._plot.setLabel("left", "Time (samples)")
         self._plot.setLabel("bottom", "Value")

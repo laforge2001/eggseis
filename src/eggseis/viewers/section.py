@@ -16,6 +16,8 @@ from eggseis.viewers.horizon_overlay import (
     inline_polyline_points,
     xline_polyline_points,
 )
+from eggseis.viewers.theme import apply_to_plot_widget
+from eggseis.viewers.theme import colors as _theme_colors
 
 DEFAULT_LUT = "gray"
 _MOUSE_RATE_HZ = 60
@@ -31,7 +33,7 @@ class SectionViewer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._plot = pg.PlotWidget()
-        self._plot.setBackground("w")
+        apply_to_plot_widget(self._plot)
         self._plot.invertY(True)
         self._image = pg.ImageItem(axisOrder="row-major")
         self._plot.addItem(self._image)
@@ -41,7 +43,8 @@ class SectionViewer(QWidget):
         # Transient warning banner for "horizon not visible" / similar UX hints.
         self._status_label = QLabel("")
         self._status_label.setStyleSheet(
-            "QLabel { color: #aa6600; padding: 2px 6px; font-size: 11px; }"
+            f"QLabel {{ color: {_theme_colors()['warning']}; "
+            f"padding: 2px 6px; font-size: 11px; }}"
         )
         self._status_label.setVisible(False)
         layout.addWidget(self._status_label)

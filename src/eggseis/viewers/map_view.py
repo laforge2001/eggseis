@@ -8,6 +8,13 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from eggseis.axes import Axis
 from eggseis.data import SeismicVolume
+from eggseis.viewers.theme import (
+    apply_to_plot_widget,
+    is_dark_mode,
+)
+from eggseis.viewers.theme import (
+    colors as _theme_colors,
+)
 
 
 class MapViewWidget(QWidget):
@@ -23,7 +30,7 @@ class MapViewWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self._plot = pg.PlotWidget()
-        self._plot.setBackground("w")
+        apply_to_plot_widget(self._plot)
         self._plot.setLabel("left", "Inline")
         self._plot.setLabel("bottom", "Xline")
         self._plot.setAspectLocked(True)
@@ -31,8 +38,12 @@ class MapViewWidget(QWidget):
         layout.addWidget(self._plot)
 
         self._volume: SeismicVolume | None = None
-        self._outline = pg.PlotDataItem(pen=pg.mkPen("#888888", width=1.5))
-        self._slice_indicator = pg.PlotDataItem(pen=pg.mkPen("#ff3333", width=2))
+        c = _theme_colors()
+        self._outline = pg.PlotDataItem(pen=pg.mkPen(c["axis"], width=1.5))
+        # Indicator: red works on either background, but lighten in dark mode
+        # so it doesn't blow out against the muted #1e1e1e bg.
+        indicator_color = "#ff5555" if is_dark_mode() else "#ff3333"
+        self._slice_indicator = pg.PlotDataItem(pen=pg.mkPen(indicator_color, width=2))
         self._plot.addItem(self._outline)
         self._plot.addItem(self._slice_indicator)
 
