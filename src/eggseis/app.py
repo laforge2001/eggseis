@@ -171,6 +171,11 @@ class MainWindow(QMainWindow):
         self._lock_levels_action.toggled.connect(self.section_viewer.set_levels_locked)
         m_view.addAction(self._lock_levels_action)
 
+        m_survey = self.menuBar().addMenu("&Survey")
+        a_edit_headers = QAction("&Edit Trace Headers…", self)
+        a_edit_headers.triggered.connect(self._on_edit_trace_headers)
+        m_survey.addAction(a_edit_headers)
+
         m_graph = self.menuBar().addMenu("&Graph")
         a_add_node = QAction("&Add Plugin to Graph…", self)
         a_add_node.triggered.connect(self._on_add_node_to_graph)
@@ -292,6 +297,54 @@ class MainWindow(QMainWindow):
             self.open_project(Path(d))
         except (FileNotFoundError, ValueError) as exc:
             QMessageBox.critical(self, "Open Project failed", str(exc))
+
+    def _on_edit_trace_headers(self) -> None:
+        from eggseis.widgets.header_editor import HeaderEditorDialog
+
+        if self.section_viewer.geometry is None:
+            QMessageBox.information(
+                self, "Edit Trace Headers",
+                "Open a survey first."
+            )
+            return
+        dialog = HeaderEditorDialog(self.section_viewer.geometry, self)
+        dialog.geometryOverridden.connect(self._apply_geometry_override)
+        dialog.geometryReset.connect(self._reset_geometry_override)
+        dialog.show()
+
+    def _apply_geometry_override(self, new_geom) -> None:
+        # Replace the volume's geometry view by re-binding the slice nav and
+        # section viewer with the override. Note: the volume's read_inline/etc
+        # still index into the original mdio store; this just changes how the
+        # UI labels + addresses sections.
+        if not self.section_viewer.has_volume:
+            return
+        volume = self.section_viewer._volume
+        backend = volume._backend
+        # In-memory override: replace the SurveyGeometry on the underlying
+        # backend. For v1.0 we do this defensively via attribute write.
+        try:
+            object.__setattr__(backend, "_geometry", new_geom)
+        except (AttributeError, TypeError):
+            QMessageBox.warning(
+                self, "Override failed",
+                "This backend does not support in-memory geometry overrides."
+            )
+            return
+        # Re-bind UI consumers.
+        self.slice_nav.set_geometry(new_geom)
+        if hasattr(self, "map_view"):
+            self.map_view.set_volume(volume)
+        self.statusBar().showMessage("Geometry override applied.", 3000)
+
+    def _reset_geometry_override(self) -> None:
+        # Easier path: re-open the survey from disk.
+        if self._active_survey_id is None:
+            return
+        self.open_survey(
+            Path(self._active_survey_id),
+            survey_name=self._active_survey_name,
+        )
 
     def _show_errors_dialog(
         self, title: str, summary: str, empty_message: str, body_lines: list[str]

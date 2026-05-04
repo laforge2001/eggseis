@@ -68,7 +68,7 @@ def test_main_window_menus(qtbot):
 
     bar = win.menuBar()
     titles = [a.text().replace("&", "") for a in bar.actions()]
-    assert titles == ["File", "View", "Graph", "Attribute", "Help"]
+    assert titles == ["File", "View", "Survey", "Graph", "Attribute", "Help"]
     _ = Qt
 
 
