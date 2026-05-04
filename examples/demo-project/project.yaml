@@ -1,10 +1,18 @@
+schema_version: 1
 name: eggseis demo
 surveys:
-  - name: demo
-    path: ../../demo.mdio
-  - name: wedge
-    path: wedge.mdio
-  - name: checkerboard
-    path: checkerboard.mdio
-horizons: []
-wells: []
+- name: demo
+  path: /Users/ericgeordi/dev/eggseis/demo.mdio
+- name: wedge
+  path: wedge.mdio
+- name: checkerboard
+  path: checkerboard.mdio
+horizons:
+- name: wedge_top
+  path: horizons/wedge_top
+  color: '#ffcc00'
+viewer:
+  axis: inline
+  index: 0
+  colormap: gray
+  levels_locked: true

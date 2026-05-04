@@ -110,6 +110,15 @@ def test_horizon_model_hidden_from_lib_right_click_menu(canvas):
     assert nid in g.nodes
 
 
+def test_scene_node_to_graph_id_resolves_horizon_scene_node(canvas):
+    """Right-click context-menu lookup must walk _horizon_scene_nodes too."""
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    horizon_scene = canvas.horizon_scene_node_for(nid)
+    assert canvas._scene_node_to_graph_id(horizon_scene) == nid
+
+
 def test_disconnect_horizon_removes_association_and_line(canvas):
     g = Graph()
     canvas.bind(g)

@@ -535,10 +535,18 @@ class GraphCanvas(QWidget):
     # --- lib-signal sync (user-drag on canvas) -------------------------
 
     def _scene_node_to_graph_id(self, scene_node) -> str | None:
-        """Reverse-lookup: scene node -> graph node_id (or SOURCE_ID)."""
+        """Reverse-lookup: scene node -> graph node_id (or SOURCE_ID).
+
+        Walks both `_scene_nodes` (plugin nodes) and `_horizon_scene_nodes`
+        so horizon-node right-click context menus and other reverse-lookup
+        consumers can resolve a horizon scene-node to its graph id.
+        """
         if scene_node is self._source_scene_node:
             return SOURCE_ID
         for node_id, sn in self._scene_nodes.items():
+            if sn is scene_node:
+                return node_id
+        for node_id, sn in self._horizon_scene_nodes.items():
             if sn is scene_node:
                 return node_id
         return None
