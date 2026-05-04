@@ -11,8 +11,30 @@ horizons:
 - name: wedge_top
   path: horizons/wedge_top
   color: '#ffcc00'
+wells:
+- name: well_a
+  path: wells/well_a.h5
+graph:
+  active_survey: wedge
+  graph:
+    nodes:
+    - node_id: 3eaa08d228514e769474b041124bbbab
+      kind: horizon
+      horizon_name: wedge_top
+      pos:
+      - 74.0
+      - 308.40000000000003
+    edges: []
+    tap_port:
+    - source
+    - inline
+    associations:
+    - horizon_node_id: 3eaa08d228514e769474b041124bbbab
+      source_node_id: source
+    pinned_overlays:
+    - 3eaa08d228514e769474b041124bbbab
 viewer:
   axis: inline
-  index: 0
+  index: 113
   colormap: gray
   levels_locked: true

@@ -436,6 +436,8 @@ class GraphCanvas(QWidget):
             # model, which still holds the canonical state we're rendering.
             self._scene.clear_scene()
             self._scene_nodes.clear()
+            self._horizon_scene_nodes.clear()
+            self._dashed_lines.clear()
             self._source_scene_node = None
 
             # Re-spawn Source. Source stays movable + wireable + selectable;
@@ -449,13 +451,33 @@ class GraphCanvas(QWidget):
         if self._graph is None:
             return
 
-        # Spawn nodes.
+        # Spawn nodes — branch on kind so horizon nodes get their scene model
+        # (no ports) + dashed line back to Source instead of the plugin path.
         for node in self._graph.nodes.values():
-            self._spawn_scene_node(node)
+            if node.kind == "horizon":
+                self._spawn_horizon_scene_node(node)
+            else:
+                self._spawn_scene_node(node)
 
         # Spawn edges.
         for edge in self._graph.edges:
             self._spawn_scene_edge(edge)
+
+    def _spawn_horizon_scene_node(self, node: Node) -> None:
+        """Render a horizon node + dashed line. Used both by add_horizon_node
+        (live add) and by _rerender (graph reloaded from project.yaml)."""
+        self._suppress_signal_sync = True
+        try:
+            scene_node = self._scene.create_node(_HorizonModel)
+        finally:
+            self._suppress_signal_sync = False
+        scene_node.model.caption = node.horizon_name or "Horizon"
+        if node.pos != (0.0, 0.0):
+            scene_node.position = node.pos
+        self._horizon_scene_nodes[node.node_id] = scene_node
+        # Only draw the dashed line if the horizon is associated with a Source.
+        if any(a.horizon_node_id == node.node_id for a in self._graph.associations):
+            self._add_dashed_line(node.node_id)
 
     def _spawn_scene_node(self, node: Node) -> None:
         model_cls = self._ensure_spec_registered(node.spec)

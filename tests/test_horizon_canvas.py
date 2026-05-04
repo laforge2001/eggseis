@@ -110,6 +110,30 @@ def test_horizon_model_hidden_from_lib_right_click_menu(canvas):
     assert nid in g.nodes
 
 
+def test_rerender_spawns_scene_nodes_for_horizon_kind(canvas):
+    """Reloading a graph that already has horizon nodes (e.g. from project.yaml)
+    must spawn matching scene nodes + dashed lines on bind()."""
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    # Simulate fresh bind: same graph, but rerender wipes + repopulates.
+    canvas.bind(g)
+    assert canvas.horizon_scene_node_for(nid) is not None
+    assert canvas.dashed_line_for(nid) is not None
+
+
+def test_rerender_skips_dashed_line_for_disconnected_horizon(canvas):
+    """If a saved graph has a horizon node with no Association, no dashed
+    line is drawn on rerender."""
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    canvas.disconnect_horizon(nid)
+    canvas.bind(g)
+    assert canvas.horizon_scene_node_for(nid) is not None
+    assert canvas.dashed_line_for(nid) is None
+
+
 def test_scene_node_to_graph_id_resolves_horizon_scene_node(canvas):
     """Right-click context-menu lookup must walk _horizon_scene_nodes too."""
     g = Graph()
