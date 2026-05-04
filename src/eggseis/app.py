@@ -34,6 +34,7 @@ from eggseis.plugin_template import create_template, open_in_editor
 from eggseis.project import Project
 from eggseis.viewers.map_view import MapViewWidget
 from eggseis.viewers.section import DEFAULT_LUT, SectionViewer
+from eggseis.viewers.well_log_panel import WellLogPanel
 from eggseis.widgets.param_dock import ParamDock
 from eggseis.widgets.project_tree import ProjectTreeWidget
 from eggseis.widgets.slice_nav import SliceNavigator
@@ -65,14 +66,18 @@ class MainWindow(QMainWindow):
 
         self._canvas = GraphCanvas()
 
+        self.well_log_panel = WellLogPanel()
+
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.tree)
         splitter.addWidget(viewer_pane)
         splitter.addWidget(self._canvas)
+        splitter.addWidget(self.well_log_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 1)
-        splitter.setSizes([220, 600, 380])
+        splitter.setStretchFactor(3, 0)
+        splitter.setSizes([220, 600, 380, 0])  # well lane hidden initially
         self.setCentralWidget(splitter)
 
         # Legacy Attribute-menu param dock kept around for the menu-driven
@@ -652,6 +657,10 @@ class MainWindow(QMainWindow):
             self.section_viewer.add_horizon_overlay(horizon)
         self.statusBar().showMessage(f"Imported horizon {horizon.name}", 3000)
 
+    def _splitter_sizes_with_log_lane(self) -> list[int]:
+        """Sizes for the central splitter when the well log lane is visible."""
+        return [220, 500, 320, 200]
+
     def _on_import_well(self) -> None:
         from eggseis.data.well import import_las
 
@@ -678,6 +687,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Import failed", str(exc))
             return
         self.section_viewer.add_well_overlay(well)
+        sample_rate = (
+            self.section_viewer.geometry.sample_rate_ms
+            if self.section_viewer.geometry is not None
+            else 1.0
+        )
+        self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+        # Make the well log lane visible.
+        self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
         if self._project is not None:
             from eggseis.project import WellEntry
             target = self._project.root / "wells" / f"{well.name}.h5"
