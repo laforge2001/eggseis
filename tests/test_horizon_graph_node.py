@@ -177,6 +177,30 @@ def test_orphan_horizon_on_load_raises(linear_spec):
         Graph.from_dict(d, plugins={linear_spec.id: linear_spec}, horizons={})
 
 
+def test_graph_disconnect_horizon_idempotent():
+    g = Graph()
+    nid = g.add_horizon_node(horizon_name="top")
+    g.disconnect_horizon(nid)
+    g.disconnect_horizon(nid)  # second call is silent
+    assert all(a.horizon_node_id != nid for a in g.associations)
+
+
+def test_graph_connect_horizon_rejects_plugin_node(linear_spec):
+    g = Graph()
+    n = Node(spec=linear_spec, params=linear_spec.param_model())
+    g.add_node(n)
+    with pytest.raises(ValueError, match="horizon"):
+        g.connect_horizon(n.node_id)
+
+
+def test_disconnect_then_undo_restores_association():
+    g = Graph()
+    nid = g.add_horizon_node(horizon_name="top")
+    g.disconnect_horizon(nid)
+    g.undo()
+    assert any(a.horizon_node_id == nid for a in g.associations)
+
+
 def test_from_dict_round_trip_with_mixed_graph(linear_spec):
     """Round-trip a graph carrying plugin nodes + edges + horizon nodes
     + associations + pinned overlays. Everything survives."""

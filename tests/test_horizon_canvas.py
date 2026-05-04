@@ -110,6 +110,43 @@ def test_horizon_model_hidden_from_lib_right_click_menu(canvas):
     assert nid in g.nodes
 
 
+def test_disconnect_horizon_removes_association_and_line(canvas):
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    assert canvas.dashed_line_for(nid) is not None
+    assert canvas.is_horizon_connected(nid)
+    canvas.disconnect_horizon(nid)
+    assert canvas.dashed_line_for(nid) is None
+    assert not canvas.is_horizon_connected(nid)
+    assert all(a.horizon_node_id != nid for a in g.associations)
+    # Node is still on the canvas.
+    assert nid in g.nodes
+
+
+def test_reconnect_horizon_restores_line_and_association(canvas):
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    canvas.disconnect_horizon(nid)
+    canvas.connect_horizon(nid)
+    assert canvas.dashed_line_for(nid) is not None
+    assert canvas.is_horizon_connected(nid)
+    assert any(a.horizon_node_id == nid for a in g.associations)
+
+
+def test_disconnected_horizon_not_in_visible_horizons_for_tap(canvas):
+    """Pinned but disconnected → not visible (no Source association)."""
+    g = Graph()
+    canvas.bind(g)
+    nid = canvas.add_horizon_node("top")
+    canvas.disconnect_horizon(nid)
+    # Still pinned, but no association.
+    assert nid in g.pinned_overlays
+    visible = g.visible_horizons_for_tap(*g.tap_port)
+    assert nid not in visible
+
+
 def test_delete_key_path_removes_horizon(canvas):
     """Lib's delete_selection action emits node_deleted; canvas must
     mirror that into Graph state for horizon nodes (not just plugins)."""

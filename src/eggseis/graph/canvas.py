@@ -263,6 +263,32 @@ class GraphCanvas(QWidget):
     def dashed_line_for(self, node_id: str):
         return self._dashed_lines.get(node_id)
 
+    def disconnect_horizon(self, node_id: str) -> None:
+        """Drop the dashed line + association for the given horizon node."""
+        if self._graph is None:
+            return
+        self._graph.disconnect_horizon(node_id)
+        line_item = self._dashed_lines.pop(node_id, None)
+        if line_item is not None:
+            self._scene.removeItem(line_item)
+        self.edgeChanged.emit()
+
+    def connect_horizon(self, node_id: str) -> None:
+        """Re-create the dashed line + association to Source."""
+        if self._graph is None:
+            return
+        self._graph.connect_horizon(node_id)
+        if node_id not in self._dashed_lines:
+            self._add_dashed_line(node_id)
+        self.edgeChanged.emit()
+
+    def is_horizon_connected(self, node_id: str) -> bool:
+        if self._graph is None:
+            return False
+        return any(
+            a.horizon_node_id == node_id for a in self._graph.associations
+        )
+
     def _add_dashed_line(self, horizon_node_id: str) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtGui import QColor, QPen

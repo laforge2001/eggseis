@@ -165,6 +165,42 @@ class Graph:
         if the id is unknown or the node was never pinned."""
         self.pinned_overlays.discard(node_id)
 
+    def disconnect_horizon(self, horizon_node_id: str) -> None:
+        """Drop the Association linking a horizon node to its Source.
+
+        Idempotent — silent if the horizon was already disconnected. Pinned
+        state is preserved; the overlay stops rendering because
+        `visible_horizons_for_tap` filters by association membership.
+        """
+        before = list(self.associations)
+        self.associations = [
+            a for a in self.associations if a.horizon_node_id != horizon_node_id
+        ]
+        if before != self.associations:
+            self._record(("connect_horizon", horizon_node_id, SOURCE_ID))
+
+    def connect_horizon(self, horizon_node_id: str, source_node_id: str = SOURCE_ID) -> None:
+        """Add (or replace) the Association linking a horizon to a Source.
+
+        Raises KeyError if `horizon_node_id` is not a horizon-kind node in
+        the graph. Multiple associations to different Sources for the same
+        horizon are not allowed in v1.0.
+        """
+        node = self.nodes[horizon_node_id]
+        if node.kind != "horizon":
+            raise ValueError(
+                f"connect_horizon: node {horizon_node_id!r} kind={node.kind!r} "
+                f"(expected horizon)"
+            )
+        # Remove any prior association for this horizon.
+        self.associations = [
+            a for a in self.associations if a.horizon_node_id != horizon_node_id
+        ]
+        self.associations.append(
+            Association(horizon_node_id=horizon_node_id, source_node_id=source_node_id)
+        )
+        self._record(("disconnect_horizon", horizon_node_id))
+
     def remove_node(self, node_id: str) -> None:
         if node_id == SOURCE_ID:
             raise ValueError("cannot remove implicit Source node")
@@ -523,6 +559,14 @@ class Graph:
             self.nodes[op[1]].enabled = op[2]
         elif kind == "set_tap":
             self.tap_port = op[1]
+        elif kind == "disconnect_horizon":
+            self.associations = [
+                a for a in self.associations if a.horizon_node_id != op[1]
+            ]
+        elif kind == "connect_horizon":
+            self.associations.append(
+                Association(horizon_node_id=op[1], source_node_id=op[2])
+            )
         else:
             raise AssertionError(f"unknown undo op: {kind}")
 

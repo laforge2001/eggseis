@@ -677,6 +677,21 @@ class MainWindow(QMainWindow):
         )
         menu.addAction(toggle)
         menu.addSeparator()
+        is_connected = self._canvas.is_horizon_connected(node_id)
+        toggle_conn = QAction(
+            "Disconnect from Source" if is_connected else "Connect to Source",
+            self,
+        )
+        if is_connected:
+            toggle_conn.triggered.connect(
+                lambda _checked, nid=node_id: self._canvas.disconnect_horizon(nid)
+            )
+        else:
+            toggle_conn.triggered.connect(
+                lambda _checked, nid=node_id: self._canvas.connect_horizon(nid)
+            )
+        menu.addAction(toggle_conn)
+        menu.addSeparator()
         remove = QAction("Remove", self)
         remove.triggered.connect(
             lambda _checked, nid=node_id: self._canvas.remove_node(nid)
