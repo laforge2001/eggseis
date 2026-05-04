@@ -12,11 +12,13 @@ from eggseis.project import Project
 
 _PATH_ROLE = Qt.ItemDataRole.UserRole
 _HORIZON_NAME_ROLE = Qt.ItemDataRole.UserRole + 1
+_WELL_NAME_ROLE = Qt.ItemDataRole.UserRole + 2
 
 
 class ProjectTreeWidget(QTreeWidget):
     surveyActivated = Signal(Path)
     horizonActivated = Signal(str)
+    wellActivated = Signal(str)
     loadRequested = Signal(str)  # category name: "survey", "horizon", or "well"
 
     def __init__(self) -> None:
@@ -45,7 +47,9 @@ class ProjectTreeWidget(QTreeWidget):
 
         wells = QTreeWidgetItem(["Wells"])
         for w in project.wells:
-            wells.addChild(QTreeWidgetItem([w.name]))
+            item = QTreeWidgetItem([w.name])
+            item.setData(0, _WELL_NAME_ROLE, w.name)
+            wells.addChild(item)
         root.addChild(wells)
 
         self.addTopLevelItem(root)
@@ -62,6 +66,10 @@ class ProjectTreeWidget(QTreeWidget):
         horizon_name = item.data(0, _HORIZON_NAME_ROLE)
         if horizon_name:
             self.horizonActivated.emit(str(horizon_name))
+            return
+        well_name = item.data(0, _WELL_NAME_ROLE)
+        if well_name:
+            self.wellActivated.emit(str(well_name))
 
     def _on_context_menu(self, pos) -> None:
         item = self.itemAt(pos)

@@ -128,3 +128,41 @@ def test_project_load_horizon_unknown_raises(tmp_path):
     p = Project.load(root)
     with pytest.raises(KeyError, match="missing"):
         p.load_horizon("missing")
+
+
+def test_project_load_well_returns_well_object(tmp_path):
+    """Project.load_well mirrors load_horizon — returns a Well object."""
+    from eggseis.data.well import Well
+    from eggseis.project import Project
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "wells").mkdir()
+    md = np.array([0.0, 100.0, 200.0], dtype=np.float32)
+    deviation = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
+    well = Well(name="W1", deviation=deviation, logs={}, markers=[], surface_xy=(0.0, 0.0))
+    well.save(root / "wells" / "W1.h5")
+    (root / "project.yaml").write_text(
+        "schema_version: 1\n"
+        "name: test\n"
+        "surveys: []\n"
+        "wells:\n"
+        "  - {name: W1, path: wells/W1.h5}\n"
+    )
+    p = Project.load(root)
+    loaded = p.load_well("W1")
+    assert isinstance(loaded, Well)
+    assert loaded.name == "W1"
+
+
+def test_project_load_well_unknown_raises(tmp_path):
+    from eggseis.project import Project
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "project.yaml").write_text(
+        "schema_version: 1\nname: test\nsurveys: []\n"
+    )
+    p = Project.load(root)
+    with pytest.raises(KeyError, match="missing"):
+        p.load_well("missing")

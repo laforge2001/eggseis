@@ -400,3 +400,50 @@ def test_pin_unpin_horizon_node_updates_section_viewer(qtbot, demo_project_path)
     win._canvas.set_horizon_pinned(nid, False)
     qtbot.wait(50)
     assert "test_top" not in win.section_viewer.horizon_overlay_names()
+
+
+def test_double_click_well_in_tree_loads_into_viewer(qtbot, demo_project_path):
+    """Double-click on a well item in the tree adds it to the section viewer
+    and populates the log panel."""
+    import numpy as np
+
+    from eggseis.data.well import Well
+    from eggseis.project import WellEntry
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Add a synthetic well to the project + save to disk.
+    md = np.linspace(0.0, 200.0, 5, dtype=np.float32)
+    dev = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
+    well = Well(
+        name="WTEST",
+        deviation=dev,
+        logs={"GR": np.array([55.0, 60.0, 65.0, 70.0, 75.0], dtype=np.float32)},
+        markers=[],
+        surface_xy=(0.0, 0.0),
+    )
+    target = win._project.root / "wells" / "WTEST.h5"
+    well.save(target)
+    win._project = win._project.with_well_added(WellEntry(name="WTEST", path=target))
+    win.tree.set_project(win._project)
+
+    # Find the new well item under the Wells category.
+    project_root = win.tree.topLevelItem(0)
+    wells_group = project_root.child(2)  # 0=Surveys, 1=Horizons, 2=Wells
+    assert wells_group.text(0) == "Wells"
+    well_item = None
+    for i in range(wells_group.childCount()):
+        if wells_group.child(i).text(0) == "WTEST":
+            well_item = wells_group.child(i)
+            break
+    assert well_item is not None
+
+    win.tree.itemDoubleClicked.emit(well_item, 0)
+    qtbot.wait(50)
+    assert "WTEST" in win.section_viewer._well_overlays
+    assert win.well_log_panel.selected_curve() == "GR"

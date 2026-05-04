@@ -79,6 +79,18 @@ class Project:
             raise KeyError(f"horizon {name!r} not in project")
         return Horizon.load(entry.path)
 
+    def load_well(self, name: str):
+        """Look up a WellEntry by name and return the loaded Well object.
+
+        Raises KeyError if no entry matches.
+        """
+        from eggseis.data.well import Well
+
+        entry = next((w for w in self.wells if w.name == name), None)
+        if entry is None:
+            raise KeyError(f"well {name!r} not in project")
+        return Well.load(entry.path)
+
     @classmethod
     def load(cls, project_dir: str | Path) -> Project:
         root = Path(project_dir).resolve()

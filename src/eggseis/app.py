@@ -251,6 +251,7 @@ class MainWindow(QMainWindow):
     def _wire_signals(self) -> None:
         self.tree.surveyActivated.connect(self.open_survey)
         self.tree.horizonActivated.connect(self._on_horizon_activated)
+        self.tree.wellActivated.connect(self._on_well_activated)
         self.tree.loadRequested.connect(self._on_tree_load_requested)
         self.slice_nav.sliceChanged.connect(self._on_slice_changed)
         self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
@@ -277,6 +278,30 @@ class MainWindow(QMainWindow):
         # add_horizon_node auto-pins via Graph.add_horizon_node and the
         # nodeAdded signal triggers _sync_horizon_overlays.
         self._canvas.add_horizon_node(name)
+
+    def _on_well_activated(self, name: str) -> None:
+        if self._active_survey_id is None:
+            QMessageBox.information(
+                self, "Load Well",
+                "Open a survey first, then double-click a well to load it."
+            )
+            return
+        if self._project is None:
+            return
+        try:
+            well = self._project.load_well(name)
+        except KeyError as exc:
+            QMessageBox.warning(self, "Load Well", str(exc))
+            return
+        self.section_viewer.add_well_overlay(well)
+        sample_rate = (
+            self.section_viewer.geometry.sample_rate_ms
+            if self.section_viewer.geometry else 1.0
+        )
+        self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+        # Reveal the log lane.
+        self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
+        self.statusBar().showMessage(f"Loaded well {name}", 3000)
 
     def _on_tree_load_requested(self, category: str) -> None:
         if category == "horizon":
