@@ -52,12 +52,16 @@ class Project:
     schema_version: int = 0
     graph: dict | None = None       # {"active_survey": str, "graph": Graph.to_dict()}
     viewer: dict | None = None      # {"axis", "index", "colormap", "levels_locked"}
+    open_wells: tuple[str, ...] = field(default_factory=tuple)
 
     def with_graph(self, *, graph_dict: dict, active_survey: str) -> Project:
         return _replace(self, graph={"active_survey": active_survey, "graph": graph_dict})
 
     def with_viewer(self, viewer: dict) -> Project:
         return _replace(self, viewer=dict(viewer))
+
+    def with_open_wells(self, names: tuple[str, ...]) -> Project:
+        return _replace(self, open_wells=tuple(names))
 
     def with_horizon_added(self, entry: HorizonEntry) -> Project:
         existing = tuple(h for h in self.horizons if h.name != entry.name)
@@ -139,6 +143,8 @@ class Project:
             resolved = raw if raw.is_absolute() else (root / raw)
             wells.append(WellEntry(name=w["name"], path=resolved))
 
+        open_wells = tuple(data.get("open_wells", []) or [])
+
         return cls(
             name=data["name"],
             root=root,
@@ -148,6 +154,7 @@ class Project:
             schema_version=schema_version,
             graph=data.get("graph"),
             viewer=data.get("viewer"),
+            open_wells=open_wells,
         )
 
     def save(self, path: Path | None = None) -> None:
@@ -175,4 +182,6 @@ class Project:
             out["graph"] = self.graph
         if self.viewer is not None:
             out["viewer"] = self.viewer
+        if self.open_wells:
+            out["open_wells"] = list(self.open_wells)
         manifest.write_text(yaml.safe_dump(out, sort_keys=False))

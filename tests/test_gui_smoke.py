@@ -447,3 +447,63 @@ def test_double_click_well_in_tree_loads_into_viewer(qtbot, demo_project_path):
     qtbot.wait(50)
     assert "WTEST" in win.section_viewer._well_overlays
     assert win.well_log_panel.selected_curve() == "GR"
+
+
+def test_open_project_auto_opens_active_survey(qtbot, demo_project_path):
+    """Opening a project that has a saved active_survey re-opens it
+    and applies viewer state without explicit user action."""
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    # Manually open survey + save with viewer state.
+    survey_item = _find_first_survey_item(win.tree)
+    win.tree.itemDoubleClicked.emit(survey_item, 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+    win.section_viewer.show_slice("xline", win.section_viewer.geometry.xline_min + 5)
+    win.set_colormap("seismic")
+    # _on_save_project requires a graph + active_survey to set graph_dict.
+    # The graph already has active_survey wired through open_survey, so just save.
+    win._on_save_project()
+    qtbot.wait(50)
+
+    # Re-open in a fresh window.
+    win2 = MainWindow()
+    qtbot.addWidget(win2)
+    win2.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win2.section_viewer.has_volume, timeout=2000)
+    assert win2.section_viewer.current_axis == "xline"
+    assert win2.section_viewer.lut_name == "seismic"
+
+
+def test_open_project_restores_loaded_wells(qtbot, demo_project_path):
+    """If a project saved with open_wells, those wells reappear on load."""
+    import numpy as np
+
+    from eggseis.data.well import Well
+    from eggseis.project import WellEntry
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Synthesise + persist a well, register in project, save.
+    md = np.linspace(0.0, 100.0, 3, dtype=np.float32)
+    dev = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
+    well = Well(name="WX", deviation=dev, logs={"GR": md.copy()}, markers=[], surface_xy=(0.0, 0.0))
+    target = win._project.root / "wells" / "WX.h5"
+    well.save(target)
+    win._project = win._project.with_well_added(WellEntry(name="WX", path=target))
+    win.section_viewer.add_well_overlay(well)
+    win._on_save_project()
+    qtbot.wait(50)
+
+    win2 = MainWindow()
+    qtbot.addWidget(win2)
+    win2.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win2.section_viewer.has_volume, timeout=2000)
+    qtbot.wait(50)  # let restore handlers run
+    assert "WX" in win2.section_viewer._well_overlays

@@ -434,6 +434,65 @@ class MainWindow(QMainWindow):
         self.tree.set_project(self._project)
         self.setWindowTitle(f"eggseis — {self._project.name}")
 
+        # Auto-restore the previously-active survey if the saved graph
+        # tagged one. Status-bar hint so users know what happened.
+        active_name = None
+        if self._project.graph and isinstance(self._project.graph, dict):
+            active_name = self._project.graph.get("active_survey")
+        if active_name:
+            entry = next(
+                (s for s in self._project.surveys if s.name == active_name), None,
+            )
+            if entry is not None:
+                self.statusBar().showMessage(
+                    f"Restoring session state for {entry.name}…", 5000
+                )
+                self.open_survey(entry.path, survey_name=entry.name)
+                # After open_survey runs, apply viewer state and reload wells.
+                self._restore_viewer_state()
+                self._restore_open_wells()
+
+    def _restore_viewer_state(self) -> None:
+        if self._project is None or self._project.viewer is None:
+            return
+        v = self._project.viewer
+        try:
+            axis = v.get("axis", "inline")
+            index = int(v.get("index", 0))
+            self.section_viewer.show_slice(axis, index)
+            self.slice_nav.set_axis_and_index(axis, index)
+        except Exception:
+            pass
+        try:
+            cmap = v.get("colormap")
+            if cmap:
+                self.section_viewer.set_colormap(cmap)
+        except Exception:
+            pass
+        try:
+            lock = v.get("levels_locked")
+            if lock is not None:
+                self.section_viewer.set_levels_locked(bool(lock))
+        except Exception:
+            pass
+
+    def _restore_open_wells(self) -> None:
+        if self._project is None or not self._project.open_wells:
+            return
+        for name in self._project.open_wells:
+            try:
+                well = self._project.load_well(name)
+            except KeyError:
+                continue
+            self.section_viewer.add_well_overlay(well)
+            sample_rate = (
+                self.section_viewer.geometry.sample_rate_ms
+                if self.section_viewer.geometry else 1.0
+            )
+            self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+        if self._project.open_wells:
+            self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
+
     def open_survey(self, survey_path: Path, *, survey_name: str | None = None) -> None:
         if getattr(self, "_opening_survey", False):
             return  # Defensive: ignore re-entry from rapid double-clicks.
@@ -755,6 +814,8 @@ class MainWindow(QMainWindow):
                 active_survey=self._active_survey_name,
             )
         proj = proj.with_viewer(viewer_state)
+        loaded_well_names = tuple(self.section_viewer._well_overlays.keys())
+        proj = proj.with_open_wells(loaded_well_names)
         try:
             proj.save()
             self._project = proj
