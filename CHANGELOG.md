@@ -2,9 +2,21 @@
 
 All notable changes to eggseis are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [PEP 440](https://peps.python.org/pep-0440/).
 
-## [Unreleased] — M7 in progress
+## [0.1.0a7] — 2026-05-03
+
+**M7 — "Horizons and wells" complete.**
 
 ### Added
+- `eggseis.horizon` package: `Horizon` domain model + Zarr-backed I/O
+  (`save_horizon`, `load_horizon`, list/delete helpers). Horizons store
+  per-bin time/depth values plus optional attributes; on-disk schema is
+  versioned (`horizon_schema_version`) for forward-compat.
+- OpendTect ASCII (`.dat`) horizon importer — header-tolerant, IL/XL
+  + Z columns, multi-attribute. Fits the v1.0 `Import Horizon…`
+  workflow (academic + open-source datasets).
+- XYZ CSV horizon importer retained as the lightweight path.
+- Horizon overlay on the section viewer: per-horizon colour, pinned
+  visibility, axis-aware projection (inline / xline / timeslice).
 - Horizons-as-graph-nodes: each horizon can appear as a node on the
   canvas, dashed-edge associated with Source. Pin/unpin per horizon
   controls section-viewer overlay visibility independently of the
@@ -14,16 +26,82 @@ All notable changes to eggseis are recorded here. Format follows [Keep a Changel
   picks up the contract correctly.
 - New `Graph.associations`, `Graph.pinned_overlays`,
   `Graph.add_horizon_node`, `Graph.visible_horizons_for_tap`.
+- New canvas APIs: `add_horizon_node`, `set_horizon_pinned`,
+  `register_horizons`, `horizon_names_available`. Dashed
+  `QGraphicsLineItem` drawn between horizon and Source bounding-rect
+  centers; updates on `node_moved`.
+- New `Graph → Add Horizon to Graph…` menu action and right-click
+  context menu on horizon nodes (Pin / Unpin / Remove).
+- `Project.load_horizon(name)` helper. Horizon import now works
+  without an active survey (project tree right-click → Import
+  Horizon…).
+- `eggseis.well` package: `Well` + `WellLog` domain models, HDF5-backed
+  I/O. Wells carry XYZ deviation + named log curves with units.
+- LAS 2.0 / 3.0 importer with `LasImportError` taxonomy: alias-tolerant
+  curve naming, `isclose`-based NULL handling, useful error messages on
+  malformed sections. Hardened against the field LAS files we threw
+  at it during M7.
+- Well-path overlay on the section viewer: projects the well trajectory
+  onto the current section with lateral-offset shading and a "not
+  visible" warning banner when the well is too far from the slice to
+  draw meaningfully.
+- Well-log side panel beside the section viewer: per-well curve picker,
+  shared depth/time axis, scrolls in lockstep with the section.
+- Map view docked below the section viewer: top-down survey footprint
+  with horizon outlines, well heads, and the current section's slice
+  trace highlighted. Click-to-jump on well heads.
+- Project save / load: full graph (nodes, edges, params, positions,
+  pinned horizons, associations) + viewer state (active survey, axis,
+  index, colormap, lock-levels, pinned wells/curves) round-trips
+  through `project.yaml` + sidecar files. Schema versioned for
+  forward-compat.
+- Orphan-plugin / orphan-horizon recovery dialog on project load:
+  surfaces missing referents with a per-item action (skip node, drop
+  reference, abort load) instead of silently corrupting the graph.
+- Project tree right-click "Load…" actions for horizons and wells —
+  works without an active survey.
+- In-memory header editor (Survey → Edit Trace Headers): per-trace
+  IL / XL / coordinate edits with diff preview, undo, and an explicit
+  Apply step. Edits stay in the session; persistence to disk is a
+  future MDIO writer concern.
+- Streaming volume export: `export_volume_with_graph` now writes
+  chunked Zarr via `to_zarr(region=...)` instead of allocating the
+  full output cube. Replaces the M6 8 GB in-memory cap with a
+  bounded-memory chunked write.
+
+### Changed
 - `Graph.from_dict` signature is now keyword-only:
   `Graph.from_dict(d, *, plugins=..., horizons=None)`. Existing M6
   callers updated.
-- New canvas APIs: `add_horizon_node`, `set_horizon_pinned`,
-  `register_horizons`, `horizon_names_available`. Dashed `QGraphicsLineItem`
-  drawn between horizon and Source bounding-rect centers; updates on
-  `node_moved`.
-- New `Project.load_horizon(name)` helper.
-- New `Graph → Add Horizon to Graph…` menu action.
-- New right-click context menu on horizon nodes: Pin / Unpin / Remove.
+- Project schema bumped (`project_schema_version`, separate
+  `horizon_schema_version` and `well_schema_version`); load path
+  rejects unknown major versions and warns on unknown minor.
+- `pyproject.toml` `gui` extra adds `lasio>=0.31` and `h5py>=3.10`
+  for well I/O.
+
+### Notes
+- 397 tests at the M7 cut. CI matrix green across macOS / Ubuntu /
+  Windows × Python 3.11 / 3.12.
+- The M5 `eggseis.pipeline` package is still on disk so the M5 test
+  suite keeps passing; the GUI no longer touches it. The scheduled
+  remote agent (2026-05-14) will open the deletion PR.
+
+### Known limitations (deferred)
+- **Multi-source graphs** — deferred to v1.1 after benchmarking
+  against industry tools (Petrel, OpendTect, PaleoScan all use
+  single-volume pipelines + dedicated cross-survey tools); not the
+  right shape for v1.0.
+- **IHS grid binary horizon importer** — XYZ CSV + OpendTect ASCII
+  covers most academic + open-source workflows.
+- **Multi-curve well-log lanes** — single curve per panel today;
+  multi-curve in a follow-up.
+- **Drop M5 `eggseis.pipeline` package** — scheduled remote agent
+  fires 2026-05-14; will open a cleanup PR.
+- **Vertical port orientation on canvas** — qtpynodeeditor doesn't
+  expose orientation; deferred to v1.1.
+- **Streaming volume export RSS-during-init** — `to_zarr(compute=False)`
+  still touches a placeholder ndarray during metadata serialisation;
+  ~1.7 GB peak for a 13.5 GB target. Bounded but not zero.
 
 ## [0.1.0a6] — 2026-04-30
 
