@@ -417,6 +417,44 @@ class MainWindow(QMainWindow):
                 self._active_survey_id = survey_id
                 self._active_survey_name = survey_name or survey_path.stem
                 self._graphs.setdefault(survey_id, Graph())
+                # If project.yaml saved a graph for this survey, try to reconstruct it.
+                if (
+                    self._project is not None
+                    and self._project.graph is not None
+                    and self._project.graph.get("active_survey")
+                    == self._active_survey_name
+                ):
+                    from eggseis.graph.model import (
+                        OrphanHorizonError,
+                        OrphanPluginError,
+                    )
+                    from eggseis.plugin import registered
+
+                    graph_dict = self._project.graph["graph"]
+                    plugins = {spec.id: spec for spec in registered()}
+                    horizons = {h.name: h for h in self._project.horizons}
+                    try:
+                        self._graphs[survey_id] = Graph.from_dict(
+                            graph_dict, plugins=plugins, horizons=horizons,
+                        )
+                    except OrphanPluginError as exc:
+                        action = self._prompt_orphan_recovery(
+                            "Missing plugin",
+                            str(exc),
+                            "This project references a plugin that's not installed.",
+                        )
+                        if action == "abort":
+                            raise
+                        # else: skip → keep the empty graph already in self._graphs[survey_id]
+                    except OrphanHorizonError as exc:
+                        action = self._prompt_orphan_recovery(
+                            "Missing horizon",
+                            str(exc),
+                            "This project references a horizon that's not in "
+                            "the project's horizons folder.",
+                        )
+                        if action == "abort":
+                            raise
                 self.section_viewer.set_volume(volume)
                 self.slice_nav.set_geometry(volume.geometry)
                 self.map_view.set_volume(volume)
@@ -436,6 +474,32 @@ class MainWindow(QMainWindow):
         for popup in list(self._params_popups.values()):
             popup.close()
         self._params_popups.clear()
+
+    def _prompt_orphan_recovery(
+        self, title: str, missing: str, message: str
+    ) -> str:
+        """Show a dialog with Skip / Abort. Returns "skip" or "abort".
+
+        Install path is documented but not implemented in v1.0 — surface
+        a text-only hint pointing the user at File → New Plugin and
+        $EGGSEIS_PLUGIN_PATH.
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"{message}\n\nMissing: {missing}")
+        box.setInformativeText(
+            "Skip: load the project without this item.\n"
+            "Abort: cancel project load.\n\n"
+            "To install a missing plugin, drop the .py file under "
+            "~/.eggseis/plugins/ or set $EGGSEIS_PLUGIN_PATH."
+        )
+        box.addButton("Skip", QMessageBox.ButtonRole.AcceptRole)
+        abort_btn = box.addButton("Abort", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is abort_btn:
+            return "abort"
+        return "skip"
 
     @contextmanager
     def _busy_progress(self, title: str, message: str):
