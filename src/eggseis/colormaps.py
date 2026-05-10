@@ -9,7 +9,10 @@ from collections.abc import Callable
 
 import numpy as np
 
-LUTS_AVAILABLE: tuple[str, ...] = ("gray", "seismic", "viridis")
+LUTS_AVAILABLE: tuple[str, ...] = ("gray", "seismic", "viridis", "vik", "batlow")
+
+DEFAULT_AMPLITUDE = "vik"
+DEFAULT_ATTRIBUTE = "batlow"
 
 
 def _build_gray() -> np.ndarray:
@@ -59,10 +62,38 @@ def _build_viridis() -> np.ndarray:
     return out
 
 
+def _build_from_cmcrameri(name: str, fallback: str) -> np.ndarray:
+    """Sample cmcrameri's named colormap to a (256, 4) uint8 LUT.
+
+    Falls back to the named local builder if cmcrameri is not installed,
+    so slim installs without the optional gui extra still produce a LUT.
+    """
+    try:
+        import cmcrameri.cm as cmc  # type: ignore
+    except ImportError:
+        return _BUILDERS[fallback]()
+    cmap = getattr(cmc, name)
+    samples = cmap(np.linspace(0.0, 1.0, 256))  # (256, 4) float [0,1]
+    out = np.empty((256, 4), dtype=np.uint8)
+    out[:, :3] = (samples[:, :3] * 255).round().astype(np.uint8)
+    out[:, 3] = 255
+    return out
+
+
+def _build_vik() -> np.ndarray:
+    return _build_from_cmcrameri("vik", fallback="seismic")
+
+
+def _build_batlow() -> np.ndarray:
+    return _build_from_cmcrameri("batlow", fallback="viridis")
+
+
 _BUILDERS: dict[str, Callable[[], np.ndarray]] = {
     "gray": _build_gray,
     "seismic": _build_seismic,
     "viridis": _build_viridis,
+    "vik": _build_vik,
+    "batlow": _build_batlow,
 }
 
 _CACHE: dict[str, np.ndarray] = {}
