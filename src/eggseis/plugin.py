@@ -40,6 +40,7 @@ class PluginSpec:
     inputs: tuple[str, ...] = ("trace",)
     output: str = "out"
     kind: Literal["transform", "sink"] = "transform"
+    cmap: str | None = None
 
 
 _RESERVED_TRACE = ("trace", "traces", "context")
@@ -55,6 +56,7 @@ def _build_spec(
     vectorized: bool,
     deterministic: bool,
     kind: Literal["transform", "sink"] = "transform",
+    cmap: str | None = None,
 ) -> PluginSpec:
     sig = inspect.signature(func)
     fields: dict[str, tuple[type, Any]] = {}
@@ -110,6 +112,7 @@ def _build_spec(
         accepts_context=accepts_context,
         inputs=inputs,
         kind=kind,
+        cmap=cmap,
     )
 
 
@@ -119,6 +122,7 @@ def trace_attribute(
     version: str = "0.1.0",
     vectorized: bool = False,
     deterministic: bool = True,
+    cmap: str | None = None,
 ) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
     """Decorate a function as a trace-local seismic attribute.
 
@@ -126,7 +130,17 @@ def trace_attribute(
     argument with a `Param(...)` default becomes a pydantic field. The first
     positional argument (`trace` for scalar mode, `traces` for vectorized)
     and an optional `context` dict are treated specially.
+
+    ``cmap`` is an optional default colormap name. Validated eagerly against
+    ``eggseis.colormaps.LUTS_AVAILABLE``; an unknown value raises ``ValueError``.
     """
+    if cmap is not None:
+        from eggseis.colormaps import LUTS_AVAILABLE
+
+        if cmap not in LUTS_AVAILABLE:
+            raise ValueError(
+                f"@trace_attribute cmap={cmap!r} not in {LUTS_AVAILABLE}"
+            )
 
     def decorator(func: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
         input_port = "traces" if vectorized else "trace"
@@ -137,6 +151,7 @@ def trace_attribute(
             inputs=(input_port,),
             vectorized=vectorized,
             deterministic=deterministic,
+            cmap=cmap,
         )
         _REGISTRY[spec.id] = spec
         func._eggseis_spec = spec  # type: ignore[attr-defined]
@@ -152,6 +167,7 @@ def graph_node(
     inputs: tuple[str, ...] = ("input",),
     deterministic: bool = True,
     kind: Literal["transform", "sink"] = "transform",
+    cmap: str | None = None,
 ) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
     """Decorate a function as a graph-node plugin with N named input ports.
 
@@ -160,7 +176,17 @@ def graph_node(
     returns a single ndarray on output port `"out"`. Non-input args with a
     `Param(...)` default become pydantic fields. An optional `context` arg
     is treated as the per-call sidecar dict (same shape as `@trace_attribute`).
+
+    ``cmap`` is an optional default colormap name. Validated eagerly against
+    ``eggseis.colormaps.LUTS_AVAILABLE``; an unknown value raises ``ValueError``.
     """
+    if cmap is not None:
+        from eggseis.colormaps import LUTS_AVAILABLE
+
+        if cmap not in LUTS_AVAILABLE:
+            raise ValueError(
+                f"@graph_node cmap={cmap!r} not in {LUTS_AVAILABLE}"
+            )
 
     def decorator(func: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
         sig = inspect.signature(func)
@@ -178,6 +204,7 @@ def graph_node(
             vectorized=False,
             deterministic=deterministic,
             kind=kind,
+            cmap=cmap,
         )
         _REGISTRY[spec.id] = spec
         func._eggseis_spec = spec  # type: ignore[attr-defined]

@@ -554,3 +554,84 @@ def test_well_load_auto_snaps_section_to_well_inline(qtbot, demo_project_path):
     assert win.section_viewer.current_axis == "inline"
     assert win.section_viewer.current_index == target_inline
     assert "SNAP" in win.map_view._well_marker_items
+
+
+# -----------------------------------------------------------------------------
+# Task 13 — MainWindow integration (welcome / toolbar / status bar / theme).
+# -----------------------------------------------------------------------------
+
+def test_main_window_starts_in_welcome_state_when_no_project(qtbot):
+    from eggseis.widgets.welcome import WelcomeWidget
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    assert isinstance(win.centralWidget(), WelcomeWidget)
+
+
+def test_open_project_swaps_central_to_main_split(qtbot, demo_project_path):
+    from eggseis.widgets.welcome import WelcomeWidget
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    assert not isinstance(win.centralWidget(), WelcomeWidget)
+
+
+def test_view_theme_toggle_switches_mode(qtbot, demo_project_path):
+    from eggseis.style import current_mode
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    initial = current_mode()
+    win._on_toggle_theme()
+    assert current_mode() != initial
+
+
+def test_status_bar_shows_project_segment_after_open(qtbot, demo_project_path):
+    from eggseis.widgets.status_bar import SegmentedStatusBar
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    bar = win.statusBar()
+    assert isinstance(bar, SegmentedStatusBar)
+    assert bar._project_label.text() != "—"
+
+
+def test_open_project_appends_to_recent(qtbot, demo_project_path, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from eggseis.recent import load_recent
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    paths = [r["path"] for r in load_recent()]
+    assert str(demo_project_path) in paths
+
+
+def test_theme_persists_in_project_yaml(qtbot, demo_project_path, tmp_path):
+    """View → Theme + save → reopen restores the chosen theme."""
+    import shutil
+
+    from eggseis.style import Theme, apply_theme, current_mode
+
+    project_copy = tmp_path / "proj"
+    shutil.copytree(demo_project_path, project_copy)
+
+    # Reset state to a known starting point.
+    apply_theme(Theme.DARK)
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(project_copy)
+    win._on_toggle_theme()
+    chosen = current_mode()
+    win._on_save_project()
+
+    apply_theme(Theme.DARK)  # ensure round-trip is real, not residual
+
+    win2 = MainWindow()
+    qtbot.addWidget(win2)
+    win2.open_project(project_copy)
+    assert current_mode() is chosen

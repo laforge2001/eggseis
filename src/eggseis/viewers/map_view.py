@@ -21,7 +21,7 @@ class MapViewWidget(QWidget):
     Click-to-navigate emits sliceRequested(axis, index).
     """
 
-    sliceRequested = Signal(str, int)  # ("inline" | "xline", index)
+    sliceRequested = Signal(Axis, int)  # (Axis.INLINE | Axis.XLINE, index)
 
     def __init__(self) -> None:
         super().__init__()
@@ -152,13 +152,13 @@ class MapViewWidget(QWidget):
                 nearest_name = name
         if nearest_name is not None and nearest_dist < _WELL_SNAP_RADIUS:
             _wxl, wil = self._well_positions[nearest_name]
-            self.sliceRequested.emit("inline", round(wil))
+            self.sliceRequested.emit(Axis.INLINE, round(wil))
             return
         # Fallback: existing behavior — snap to integer grid, drive section
         # axis from the current map axis.
         x_xline = round(click_xline)
         y_inline = round(click_inline)
         if self._axis is Axis.INLINE:
-            self.sliceRequested.emit("inline", int(y_inline))
+            self.sliceRequested.emit(Axis.INLINE, int(y_inline))
         elif self._axis is Axis.XLINE:
-            self.sliceRequested.emit("xline", int(x_xline))
+            self.sliceRequested.emit(Axis.XLINE, int(x_xline))

@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QSpinBox, QWidget
 
-from eggseis.axes import AXES
+from eggseis.axes import AXES, Axis
 from eggseis.data import SurveyGeometry
 
 
@@ -64,13 +64,14 @@ class SliceNavigator(QWidget):
             return  # shortcuts may fire before any project is loaded
         self.axis.setCurrentText(axis)
 
-    def set_axis_and_index(self, axis: str, index: int) -> None:
+    def set_axis_and_index(self, axis: Axis | str, index: int) -> None:
         """Switch axis and jump to the given index.
 
         The combo's currentTextChanged handler reseeds the spinbox to the
         axis lower bound; we then write the requested index, which the
         spinbox clamps to its valid range and emits sliceChanged.
         """
+        axis = Axis(axis)
         if axis not in AXES:
             raise ValueError(f"Unknown axis {axis!r}; expected one of {AXES}")
         if self._geom is None:

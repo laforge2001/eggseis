@@ -41,6 +41,7 @@ class JobOrchestrator(QObject):
     sectionReady = Signal(int, object)
     tilesReady = Signal(int, object, object)
     failed = Signal(int, str)
+    cacheRateChanged = Signal(float)  # 0.0..1.0
 
     def __init__(self, cache: SectionLRU | None = None) -> None:
         super().__init__()
@@ -64,6 +65,9 @@ class JobOrchestrator(QObject):
         self._active: Job | None = None
         self._tiles_remaining: int = 0
         self._delivered_ranges: list[tuple[int, int]] = []
+
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
 
     @property
     def cache(self) -> SectionLRU:
@@ -111,9 +115,19 @@ class JobOrchestrator(QObject):
             if cached is not None:
                 self._pending = None
                 self.cancel_active()
+                self._cache_hits += 1
+                self._emit_cache_rate()
                 self.sectionReady.emit(Job().id, cached)
                 return
+        self._cache_misses += 1
+        self._emit_cache_rate()
         self._debounce.start()
+
+    def _emit_cache_rate(self) -> None:
+        total = self._cache_hits + self._cache_misses
+        if total == 0:
+            return
+        self.cacheRateChanged.emit(self._cache_hits / total)
 
     def cancel_active(self) -> None:
         if self._active is not None:

@@ -1,0 +1,53 @@
+/* eggseis override stylesheet — applied on top of pyqtdarktheme base.
+ *
+ * Token substitution: {token_name} placeholders are filled at apply
+ * time from eggseis.viewers.theme.colors(). Literal CSS braces must
+ * be doubled ({{...}}) because we use Python str.format() to
+ * substitute. If the syntax becomes unwieldy, switch to string.Template.
+ */
+
+QSplitter::handle {{
+    background: {border};
+}}
+
+QStatusBar {{
+    background: {surface_alt};
+    color: {text_muted};
+    border-top: 1px solid {border};
+}}
+
+QToolBar {{
+    background: {surface_alt};
+    border-bottom: 1px solid {border};
+    spacing: 8px;
+    padding: 4px 8px;
+}}
+
+QToolButton {{
+    color: {accent};
+    padding: 4px 6px;
+    border-radius: 3px;
+}}
+
+QToolButton:hover {{
+    background: {surface};
+}}
+
+QToolButton:disabled {{
+    color: {accent_muted};
+}}
+
+QTreeView, QTreeWidget {{
+    background: {surface};
+    alternate-background-color: {surface};
+    border: 1px solid {border};
+    selection-background-color: {accent_muted};
+    selection-color: {foreground};
+}}
+
+QHeaderView::section {{
+    background: {surface_alt};
+    color: {text_muted};
+    border: none;
+    padding: 4px 6px;
+}}

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.resources
 from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup, QCursor, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -21,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from eggseis.axes import Axis
 from eggseis.backends.mdio import MDIOBackend
-from eggseis.colormaps import LUTS_AVAILABLE
+from eggseis.colormaps import DEFAULT_AMPLITUDE, DEFAULT_ATTRIBUTE, LUTS_AVAILABLE
 from eggseis.compute.orchestrator import JobOrchestrator
 from eggseis.data import SeismicVolume
 from eggseis.graph.canvas import GraphCanvas
@@ -32,12 +33,18 @@ from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
 from eggseis.plugin_template import create_template, open_in_editor
 from eggseis.project import Project
+from eggseis.recent import add_recent
+from eggseis.style import Theme, apply_theme, current_mode
 from eggseis.viewers.map_view import MapViewWidget
 from eggseis.viewers.section import DEFAULT_LUT, SectionViewer
 from eggseis.viewers.well_log_panel import WellLogPanel
 from eggseis.widgets.param_dock import ParamDock
 from eggseis.widgets.project_tree import ProjectTreeWidget
 from eggseis.widgets.slice_nav import SliceNavigator
+from eggseis.widgets.status_bar import SegmentedStatusBar
+from eggseis.widgets.toolbar import PrimaryToolbar
+from eggseis.widgets.tree_icons import apply_to_tree as _apply_tree_icons
+from eggseis.widgets.welcome import WelcomeWidget
 
 _BIG_STEP = 10
 
@@ -46,6 +53,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("eggseis")
+        icon_path = importlib.resources.files("eggseis.resources") / "eggseis.svg"
+        self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1200, 800)
 
         self.tree = ProjectTreeWidget()
@@ -78,7 +87,18 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(2, 1)
         splitter.setStretchFactor(3, 0)
         splitter.setSizes([220, 600, 380, 0])  # well lane hidden initially
-        self.setCentralWidget(splitter)
+        # Cache the 4-pane splitter as an attribute so the welcome ↔ main
+        # state swap can hand it back to setCentralWidget(). Don't install
+        # it as central yet — welcome state takes over below.
+        self._main_split = splitter
+
+        # Apply default theme on launch. Idempotent if user toggles later.
+        apply_theme(Theme.DARK)
+
+        # Replace the default status bar with the segmented version BEFORE
+        # _build_menus() runs (build_menus calls self.statusBar() lazily).
+        self._status = SegmentedStatusBar()
+        self.setStatusBar(self._status)
 
         # Legacy Attribute-menu param dock kept around for the menu-driven
         # path but hidden by default. Floats if the user enables it.
@@ -136,27 +156,66 @@ class MainWindow(QMainWindow):
         self._wire_signals()
         self._build_shortcuts()
 
+        # Primary toolbar — reuses the QAction instances built in _build_menus
+        # so menu/toolbar share enable/disable + triggered handlers.
+        toolbar_actions = {
+            "open": self._action_open_project,
+            "save": self._action_save_project,
+            "import_survey": self._action_import_survey,
+            "import_horizon": self._action_import_horizon,
+            "import_well": self._action_import_well,
+            "add_plugin": self._action_add_plugin,
+            "export_volume": self._action_export_volume,
+        }
+        self._toolbar = PrimaryToolbar(toolbar_actions)
+        self.addToolBar(self._toolbar)
+        self._toolbar.set_project_loaded(False)
+
+        # Welcome empty-state — becomes the central widget until a project
+        # is opened. _show_main_split() swaps the splitter back in.
+        self._welcome = WelcomeWidget()
+        self._welcome.openProjectRequested.connect(self._action_open_project.trigger)
+        self._welcome.newProjectRequested.connect(self._action_new_project.trigger)
+        self._welcome.recentRequested.connect(self.open_project)
+        self.setCentralWidget(self._welcome)
+
+        # Compute orchestrator cache rate → status bar cache segment.
+        self._compute.cacheRateChanged.connect(self._status.set_cache_rate)
+
     def _build_menus(self) -> None:
         m_file = self.menuBar().addMenu("&File")
-        a_open = QAction("&Open Project…", self)
-        a_open.triggered.connect(self._on_open_project)
+        self._action_open_project = QAction("&Open Project…", self)
+        self._action_open_project.triggered.connect(self._on_open_project)
+        # "New Project" — stub action wired into the toolbar/welcome UI; the
+        # actual project-creation flow lands in a later milestone.
+        self._action_new_project = QAction("&New Project…", self)
+        self._action_new_project.triggered.connect(self._on_new_project)
         a_new_plugin = QAction("&New Plugin…", self)
         a_new_plugin.triggered.connect(self._on_new_plugin)
         a_quit = QAction("&Quit", self)
         a_quit.triggered.connect(self.close)
-        m_file.addAction(a_open)
+        m_file.addAction(self._action_open_project)
+        m_file.addAction(self._action_new_project)
         m_file.addAction(a_new_plugin)
         m_file.addSeparator()
-        a_import_horizon = QAction("&Import Horizon (XYZ CSV)…", self)
-        a_import_horizon.triggered.connect(self._on_import_horizon)
-        a_import_well = QAction("Import &Well (LAS)…", self)
-        a_import_well.triggered.connect(self._on_import_well)
-        m_file.addAction(a_import_horizon)
-        m_file.addAction(a_import_well)
+        # "Import Survey" — stub action exposed for toolbar wiring.
+        self._action_import_survey = QAction("Import &Survey…", self)
+        self._action_import_survey.triggered.connect(self._on_import_survey)
+        self._action_import_horizon = QAction("&Import Horizon (XYZ CSV)…", self)
+        self._action_import_horizon.triggered.connect(self._on_import_horizon)
+        self._action_import_well = QAction("Import &Well (LAS)…", self)
+        self._action_import_well.triggered.connect(self._on_import_well)
+        m_file.addAction(self._action_import_survey)
+        m_file.addAction(self._action_import_horizon)
+        m_file.addAction(self._action_import_well)
         m_file.addSeparator()
-        a_save_project = QAction("&Save Project", self)
-        a_save_project.triggered.connect(self._on_save_project)
-        m_file.addAction(a_save_project)
+        self._action_save_project = QAction("&Save Project", self)
+        self._action_save_project.triggered.connect(self._on_save_project)
+        m_file.addAction(self._action_save_project)
+        self._action_close_project = QAction("Close Project", self)
+        self._action_close_project.triggered.connect(self._on_close_project)
+        self._action_close_project.setEnabled(False)  # enabled only when a project is loaded
+        m_file.addAction(self._action_close_project)
         m_file.addSeparator()
         m_file.addAction(a_quit)
 
@@ -175,6 +234,11 @@ class MainWindow(QMainWindow):
         self._lock_levels_action.setChecked(self.section_viewer.levels_locked)
         self._lock_levels_action.toggled.connect(self.section_viewer.set_levels_locked)
         m_view.addAction(self._lock_levels_action)
+        # Theme toggle lives under View — keeps the menu titles list stable
+        # (the smoke test asserts ["File","View","Survey","Graph","Attribute","Help"]).
+        self._action_toggle_theme = QAction("Toggle &Theme", self)
+        self._action_toggle_theme.triggered.connect(self._on_toggle_theme)
+        m_view.addAction(self._action_toggle_theme)
 
         m_survey = self.menuBar().addMenu("&Survey")
         a_edit_headers = QAction("&Edit Trace Headers…", self)
@@ -182,16 +246,16 @@ class MainWindow(QMainWindow):
         m_survey.addAction(a_edit_headers)
 
         m_graph = self.menuBar().addMenu("&Graph")
-        a_add_node = QAction("&Add Plugin to Graph…", self)
-        a_add_node.triggered.connect(self._on_add_node_to_graph)
-        m_graph.addAction(a_add_node)
+        self._action_add_plugin = QAction("&Add Plugin to Graph…", self)
+        self._action_add_plugin.triggered.connect(self._on_add_node_to_graph)
+        m_graph.addAction(self._action_add_plugin)
         a_add_horizon = QAction("Add &Horizon to Graph…", self)
         a_add_horizon.triggered.connect(self._on_add_horizon_to_graph)
         m_graph.addAction(a_add_horizon)
         m_graph.addSeparator()
-        a_export = QAction("&Export Volume with Graph Applied…", self)
-        a_export.triggered.connect(self._on_export_volume)
-        m_graph.addAction(a_export)
+        self._action_export_volume = QAction("&Export Volume with Graph Applied…", self)
+        self._action_export_volume.triggered.connect(self._on_export_volume)
+        m_graph.addAction(self._action_export_volume)
 
         m_attr = self.menuBar().addMenu("&Attribute")
         self._attr_group = QActionGroup(self)
@@ -254,7 +318,7 @@ class MainWindow(QMainWindow):
         self.tree.wellActivated.connect(self._on_well_activated)
         self.tree.loadRequested.connect(self._on_tree_load_requested)
         self.slice_nav.sliceChanged.connect(self._on_slice_changed)
-        self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
+        self.section_viewer.cursorCoords.connect(self._status.set_cursor)
         self.param_dock.paramsChanged.connect(self._on_params_changed)
         self.map_view.sliceRequested.connect(
             lambda axis, idx: self.slice_nav.set_axis_and_index(axis, idx)
@@ -328,6 +392,77 @@ class MainWindow(QMainWindow):
             self.open_project(Path(d))
         except (FileNotFoundError, ValueError) as exc:
             QMessageBox.critical(self, "Open Project failed", str(exc))
+
+    def _on_new_project(self) -> None:
+        """Placeholder hook for project creation — full flow lands later."""
+        QMessageBox.information(
+            self,
+            "New Project",
+            "New Project is not implemented yet. Create a project directory "
+            "with a project.yaml manifest, then use File → Open Project.",
+        )
+
+    def _on_import_survey(self) -> None:
+        """Placeholder hook for survey import — full flow lands later."""
+        QMessageBox.information(
+            self,
+            "Import Survey",
+            "Survey import is not implemented yet. Add survey paths to the "
+            "project's project.yaml manually for now.",
+        )
+
+    def _on_toggle_theme(self) -> None:
+        """Flip dark↔light and persist the choice in the project viewer dict."""
+        new_mode = Theme.LIGHT if current_mode() is Theme.DARK else Theme.DARK
+        apply_theme(new_mode)
+        if self._project is not None:
+            viewer = dict(self._project.viewer or {})
+            viewer["theme"] = new_mode.value
+            self._project = self._project.with_viewer(viewer)
+
+    def _show_welcome(self) -> None:
+        """Swap central back to the welcome widget (e.g. on close project)."""
+        self._welcome.refresh()
+        self.setCentralWidget(self._welcome)
+        self._toolbar.set_project_loaded(False)
+        self._status.set_project_name(None)
+        self._status.set_cursor(None, None, None)
+
+    def _on_close_project(self) -> None:
+        self._project = None
+        self._show_welcome()
+        self._action_close_project.setEnabled(False)
+
+    def _show_main_split(self) -> None:
+        """Swap the welcome widget out for the 4-pane splitter."""
+        self.setCentralWidget(self._main_split)
+        self._toolbar.set_project_loaded(True)
+
+    def _cmap_for_node(self, node_id: str) -> str:
+        """Resolve the preferred colormap for a graph node.
+
+        Source-tap → DEFAULT_AMPLITUDE. Plugin node → its declared `cmap` if
+        set, else DEFAULT_ATTRIBUTE. Project-level overrides in
+        `viewer.section_cmap_overrides` win over both.
+        """
+        overrides = (
+            (self._project.viewer or {}).get("section_cmap_overrides", {})
+            if self._project is not None
+            else {}
+        )
+        if node_id in overrides:
+            return overrides[node_id]
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        node = graph.nodes.get(node_id) if graph is not None else None
+        if node is None or getattr(node, "kind", None) != "plugin":
+            return DEFAULT_AMPLITUDE
+        spec = getattr(node, "spec", None)
+        if spec is not None and getattr(spec, "cmap", None):
+            return spec.cmap
+        return DEFAULT_ATTRIBUTE
 
     def _on_edit_trace_headers(self) -> None:
         from eggseis.widgets.header_editor import HeaderEditorDialog
@@ -434,6 +569,25 @@ class MainWindow(QMainWindow):
         self._project = Project.load(path)
         self.tree.set_project(self._project)
         self.setWindowTitle(f"eggseis — {self._project.name}")
+
+        # Empty-state → main 4-pane: keep this BEFORE any open_survey call
+        # so the central widget hierarchy is correct when widgets re-bind.
+        self._show_main_split()
+        self._action_close_project.setEnabled(True)
+        self._status.set_project_name(self._project.name)
+        _apply_tree_icons(self.tree)
+
+        # Restore persisted theme (saved under viewer["theme"]).
+        viewer = self._project.viewer or {}
+        saved_theme = viewer.get("theme")
+        if saved_theme is not None:
+            try:
+                apply_theme(Theme(saved_theme))
+            except ValueError:
+                pass  # unknown value persisted; keep current theme
+
+        # Add to recent ledger — accept absolute path string for portability.
+        add_recent(str(Path(path).resolve()))
 
         # Auto-restore the previously-active survey if the saved graph
         # tagged one. Status-bar hint so users know what happened.
@@ -666,6 +820,9 @@ class MainWindow(QMainWindow):
         self.section_viewer.set_overlay(buffer, partial=True)
 
     def _on_section_ready(self, _job_id: int, arr) -> None:
+        spec = self._active_plugin
+        if spec is not None and getattr(spec, "cmap", None):
+            self.section_viewer.set_colormap(spec.cmap)
         self.section_viewer.set_overlay(arr, partial=False)
 
     def _on_compute_failed(self, _job_id: int, message: str) -> None:
@@ -820,12 +977,17 @@ class MainWindow(QMainWindow):
             if self._active_survey_id else None
         )
         graph_dict = graph.to_dict() if graph is not None else None
+        existing_viewer = dict(self._project.viewer or {})
         viewer_state = {
             "axis": self.section_viewer.current_axis,
             "index": self.section_viewer.current_index,
             "colormap": self.section_viewer.lut_name,
             "levels_locked": self.section_viewer.levels_locked,
         }
+        # Preserve keys set elsewhere (e.g. theme toggled via View → Theme).
+        for key in ("theme", "section_cmap_overrides"):
+            if key in existing_viewer:
+                viewer_state[key] = existing_viewer[key]
         proj = self._project
         if graph_dict is not None and self._active_survey_name is not None:
             proj = proj.with_graph(
@@ -1131,6 +1293,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Computing {current} of {total}: {name}…")
 
     def _on_tap_ready(self, _job_id: int, arr) -> None:
+        # Pick a per-plugin colormap (plugin spec.cmap → DEFAULT_ATTRIBUTE; source
+        # tap → DEFAULT_AMPLITUDE). Project overrides win when present.
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        if graph is not None:
+            tap_node, _ = graph.tap_port
+            self.section_viewer.set_colormap(self._cmap_for_node(tap_node))
         self.section_viewer.set_overlay(arr, partial=False)
         self.statusBar().clearMessage()
 
