@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.resources
 from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QActionGroup, QCursor, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QActionGroup, QCursor, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -46,6 +47,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("eggseis")
+        icon_path = importlib.resources.files("eggseis.resources") / "eggseis.svg"
+        self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1200, 800)
 
         self.tree = ProjectTreeWidget()
