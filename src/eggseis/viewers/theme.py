@@ -20,6 +20,12 @@ _LIGHT = {
     "warning": "#aa6600",
     "slice_indicator": "#ff3333",
     "well_marker": "#2566c8",
+    "accent": "#2566c8",
+    "accent_muted": "#7aa9e4",
+    "surface": "#fafafa",
+    "surface_alt": "#f0f0f0",
+    "border": "#d0d0d0",
+    "text_muted": "#707070",
 }
 
 _DARK = {
@@ -30,6 +36,12 @@ _DARK = {
     "warning": "#f4a700",
     "slice_indicator": "#ff5555",
     "well_marker": "#5c9eff",
+    "accent": "#5c9eff",
+    "accent_muted": "#3a6ba8",
+    "surface": "#252525",
+    "surface_alt": "#2a2a2a",
+    "border": "#3a3a3a",
+    "text_muted": "#a0a0a0",
 }
 
 
