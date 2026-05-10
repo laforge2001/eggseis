@@ -8,7 +8,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from eggseis.axes import Axis
-from eggseis.colormaps import get_lut
+from eggseis.colormaps import DEFAULT_AMPLITUDE, get_lut
 from eggseis.data import SeismicVolume
 from eggseis.data.horizon import Horizon
 from eggseis.data.well import Well
@@ -19,7 +19,7 @@ from eggseis.viewers.horizon_overlay import (
 from eggseis.viewers.theme import apply_to_plot_widget
 from eggseis.viewers.theme import colors as _theme_colors
 
-DEFAULT_LUT = "gray"
+DEFAULT_LUT = "gray"  # legacy; use DEFAULT_AMPLITUDE for new code
 _MOUSE_RATE_HZ = 60
 _PERCENTILE_SUBSAMPLE = 8  # stride into raveled slice when estimating 1/99 percentiles
 
@@ -50,8 +50,9 @@ class SectionViewer(QWidget):
         layout.addWidget(self._status_label)
 
         self._volume: SeismicVolume | None = None
-        self._lut_name = DEFAULT_LUT
-        self._image.setLookupTable(get_lut(self._lut_name))
+        self._lut_name = DEFAULT_LUT  # legacy; superseded by _current_cmap below
+        self._current_cmap: str = DEFAULT_AMPLITUDE
+        self._apply_lut(self._current_cmap)
         self._axis: Axis = Axis.INLINE
         self._index: int = 0
         self._last_emit_key: tuple | None = None
@@ -62,6 +63,18 @@ class SectionViewer(QWidget):
         # clip) are visibly intuitive instead of being normalized away.
         self._baseline_levels: tuple[float, float] | None = None
         self._levels_locked: bool = True
+
+        # Colorbar to the right of the plot area.
+        self._colorbar = pg.ColorBarItem(
+            interactive=False,
+            label=self._current_cmap,
+            width=18,
+        )
+        self._colorbar.setImageItem(self._image, insert_in=self._plot.getPlotItem())
+
+        # Re-apply on theme change to refresh axis pen colors.
+        from eggseis.style import theme_signals
+        theme_signals.themeChanged.connect(self._reapply_theme)
 
         self._proxy = pg.SignalProxy(
             self._plot.scene().sigMouseMoved,
@@ -131,6 +144,7 @@ class SectionViewer(QWidget):
         return self._volume.geometry if self._volume else None
 
     def set_volume(self, volume: SeismicVolume) -> None:
+        self.set_colormap(DEFAULT_AMPLITUDE)
         self._volume = volume
         self._axis = Axis.INLINE
         self._index = volume.geometry.inline_min
@@ -218,9 +232,26 @@ class SectionViewer(QWidget):
             else:
                 item.setData(x=[], y=[])
 
+    @property
+    def current_cmap(self) -> str:
+        return self._current_cmap
+
     def set_colormap(self, name: str) -> None:
-        self._lut_name = name
+        try:
+            get_lut(name)
+        except KeyError:
+            name = DEFAULT_AMPLITUDE
+        self._current_cmap = name
+        self._lut_name = name  # keep legacy attribute in sync
+        self._apply_lut(name)
+        self._colorbar.setLabel("left", name)
+
+    def _apply_lut(self, name: str) -> None:
         self._image.setLookupTable(get_lut(name))
+
+    def _reapply_theme(self, _mode=None) -> None:
+        apply_to_plot_widget(self._plot)
+        self.set_colormap(self._current_cmap)  # refresh colorbar text
 
     # --- transient warning banner ----------------------------------------
 
