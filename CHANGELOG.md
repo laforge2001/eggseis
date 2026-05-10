@@ -2,6 +2,35 @@
 
 All notable changes to eggseis are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [PEP 440](https://peps.python.org/pep-0440/).
 
+## [0.1.0a8] — 2026-05-10
+
+### Added
+- Dark/light theme system via pyqtdarktheme2 + override QSS layer; `View → Toggle Theme` switches at runtime; theme persists in `project.yaml`.
+- Welcome / empty-state widget with recent-projects ledger (`~/.eggseis/recent.json`, capped at 5).
+- File → Close Project action returns to the welcome state.
+- Primary toolbar with QtAwesome icons; buttons gated on project state.
+- Segmented status bar — project · cursor coords · cache hit-rate · version.
+- `JobOrchestrator.cacheRateChanged(float)` signal driving the status segment.
+- Geoscience colormaps: `cmcrameri:vik` (amplitude default) + `cmcrameri:batlow` (attribute default), with matplotlib fallbacks when cmcrameri is missing.
+- `@trace_attribute(cmap=...)` and `@graph_node(cmap=...)` for declaring per-plugin default colormap.
+- Section viewer colorbar with cmap label.
+- App icon (`eggseis.svg`) bundled as a package resource.
+- `python -m eggseis.gallery` visual regression script + committed `docs/gallery/` PNGs.
+- Tree category root icons (Surveys / Horizons / Wells via QtAwesome).
+
+### Changed
+- `MapViewWidget.sliceRequested` signal now typed `Signal(Axis, int)` (was `Signal(str, int)`).
+- `SectionViewer.cursorMoved(str)` replaced by `cursorCoords(int, int, float)` carrying structured data to the new status bar segment.
+- `SliceNav.set_axis_and_index` accepts `Axis | str`.
+
+### Fixed
+- `SectionViewer.set_volume` clears `_well_overlays` and `_horizon_overlays` on volume swap, preventing stale overlay state when switching surveys (#18).
+- Eliminated remaining inline `is_dark_mode()` ternaries; theme tokens are the single source of truth (#17).
+- `_on_save_project` no longer clobbers persisted `theme` and `section_cmap_overrides` when rebuilding viewer state.
+
+### Dependencies
+- New `[gui]` extras: `pyqtdarktheme2`, `qtawesome`, `cmcrameri`.
+
 ## [0.1.0a7] — 2026-05-03
 
 **M7 — "Horizons and wells" complete.**

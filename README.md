@@ -103,7 +103,7 @@ It's also useful for academic researchers, consultants, and independent geophysi
 
 eggseis is in **pre-alpha** development. The design is settled; the code is being written.
 
-![M2 section viewer](docs/m2-screenshot.png)
+![Section viewer with dark theme](docs/m2-screenshot.png)
 
 The roadmap is:
 
@@ -114,10 +114,23 @@ The roadmap is:
 - **M5** — Pipeline chain *(complete, [v0.1.0a5](CHANGELOG.md); list-style dock, tap-anywhere, lazy recompute, chain_hash cache)*
 - **M6** — Plugin graphs *(complete, [v0.1.0a6](CHANGELOG.md); DAG topology, multi-input plugins, qtpynodeeditor visual canvas, port_hash cache, tap any output port)*
 - **M7** — Horizons and wells *(complete, [v0.1.0a7](CHANGELOG.md); horizon + well import, overlays, map view, project save/load with graph + viewer state, header editor, streaming export)*
+- **UX polish** — *(complete, [v0.1.0a8](CHANGELOG.md); dark theme, welcome screen, toolbar, status bar, geoscience colormaps, app icon)*
 - **M8** — Volume viewer
 - **M9** — Crossplot
 - **M10** — Private alpha with early users
 - **M11** — v1.0 public release
+
+**What's working in v0.1.0a8:**
+
+- **Dark theme by default** with `View → Toggle Theme` runtime switch; choice persists in `project.yaml`.
+- **Welcome screen** with a recent-projects ledger; `File → Close Project` returns to it.
+- **Primary toolbar** with QtAwesome icons; buttons are gated on project state.
+- **Segmented status bar** — project name · cursor coordinates · cache hit-rate · version.
+- **Geoscience colormaps** — `cmcrameri:vik` (amplitude default) and `cmcrameri:batlow` (attribute default), with matplotlib fallbacks when cmcrameri is not installed.
+- **Per-plugin colormap declaration** via `@trace_attribute(cmap=...)` and `@graph_node(cmap=...)`.
+- **Section viewer colorbar** with colormap label.
+- **App icon** (`eggseis.svg`) bundled as a package resource.
+- **`python -m eggseis.gallery`** for visual regression PNGs (committed under `docs/gallery/`).
 
 A running build-in-public log lives at *(TBD)*. Follow along if that's interesting — there will be many bugs and many decisions still being made.
 
