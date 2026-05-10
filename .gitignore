@@ -60,5 +60,6 @@ tests/data/*.mdio/
 tests/data/*.segy
 *.png
 !docs/*.png
+!docs/gallery/*.png
 /demo.mdio/
 .superpowers/
