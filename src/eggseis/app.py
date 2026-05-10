@@ -318,7 +318,7 @@ class MainWindow(QMainWindow):
         self.tree.wellActivated.connect(self._on_well_activated)
         self.tree.loadRequested.connect(self._on_tree_load_requested)
         self.slice_nav.sliceChanged.connect(self._on_slice_changed)
-        self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
+        self.section_viewer.cursorCoords.connect(self._status.set_cursor)
         self.param_dock.paramsChanged.connect(self._on_params_changed)
         self.map_view.sliceRequested.connect(
             lambda axis, idx: self.slice_nav.set_axis_and_index(axis, idx)

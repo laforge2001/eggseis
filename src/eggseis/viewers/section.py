@@ -25,7 +25,7 @@ _PERCENTILE_SUBSAMPLE = 8  # stride into raveled slice when estimating 1/99 perc
 
 
 class SectionViewer(QWidget):
-    cursorMoved = Signal(str)
+    cursorCoords = Signal(int, int, float)  # (inline, xline, t_ms)
 
     def __init__(self) -> None:
         super().__init__()
@@ -144,6 +144,11 @@ class SectionViewer(QWidget):
         return self._volume.geometry if self._volume else None
 
     def set_volume(self, volume: SeismicVolume) -> None:
+        # Clear overlay state from previous volume (or same volume re-bound).
+        for name in list(self._well_overlays.keys()):
+            self.remove_well_overlay(name)
+        for name in list(self._horizon_overlays.keys()):
+            self.remove_horizon_overlay(name)
         self.set_colormap(DEFAULT_AMPLITUDE)
         self._volume = volume
         self._axis = Axis.INLINE
@@ -329,22 +334,18 @@ class SectionViewer(QWidget):
         self._last_emit_key = key
 
         g = self._volume.geometry
-        amp = float(arr[y, x])
 
         if self._axis is Axis.INLINE:
-            text = (
-                f"Inline {self._index}  Xline {g.xline_at(x)}  "
-                f"Time {g.time_at(y):.1f} ms  Amp {amp:.4g}"
-            )
+            il = self._index
+            xl = g.xline_at(x)
+            t_ms = g.time_at(y)
         elif self._axis is Axis.XLINE:
-            text = (
-                f"Xline {self._index}  Inline {g.inline_at(x)}  "
-                f"Time {g.time_at(y):.1f} ms  Amp {amp:.4g}"
-            )
+            il = g.inline_at(x)
+            xl = self._index
+            t_ms = g.time_at(y)
         else:
-            text = (
-                f"Time {g.time_at(self._index):.1f} ms  "
-                f"Inline {g.inline_at(y)}  Xline {g.xline_at(x)}  Amp {amp:.4g}"
-            )
+            il = g.inline_at(y)
+            xl = g.xline_at(x)
+            t_ms = g.time_at(self._index)
 
-        self.cursorMoved.emit(text)
+        self.cursorCoords.emit(int(il), int(xl), float(t_ms))
