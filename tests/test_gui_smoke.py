@@ -507,3 +507,50 @@ def test_open_project_restores_loaded_wells(qtbot, demo_project_path):
     qtbot.waitUntil(lambda: win2.section_viewer.has_volume, timeout=2000)
     qtbot.wait(50)  # let restore handlers run
     assert "WX" in win2.section_viewer._well_overlays
+
+
+def test_well_load_auto_snaps_section_to_well_inline(qtbot, demo_project_path):
+    """Loading a well jumps the section to that well's inline."""
+    import numpy as np
+
+    from eggseis.data.well import Well
+    from eggseis.project import WellEntry
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    geom = win.section_viewer.geometry
+    target_inline = geom.inline_min + 5
+    md = np.array([0.0, 100.0, 200.0], dtype=np.float32)
+    dev = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
+    well = Well(
+        name="SNAP",
+        deviation=dev,
+        logs={"GR": np.array([55.0, 60.0, 65.0], dtype=np.float32)},
+        markers=[],
+        surface_xy=(geom.xline_min + 3.0, float(target_inline)),
+    )
+    target = win._project.root / "wells" / "SNAP.h5"
+    well.save(target)
+    win._project = win._project.with_well_added(WellEntry(name="SNAP", path=target))
+    win.tree.set_project(win._project)
+
+    # Trigger via tree double-click.
+    project_root = win.tree.topLevelItem(0)
+    wells_group = project_root.child(2)
+    well_item = None
+    for i in range(wells_group.childCount()):
+        if wells_group.child(i).text(0) == "SNAP":
+            well_item = wells_group.child(i)
+            break
+    assert well_item is not None
+    win.tree.itemDoubleClicked.emit(well_item, 0)
+    qtbot.wait(50)
+
+    assert win.section_viewer.current_axis == "inline"
+    assert win.section_viewer.current_index == target_inline
+    assert "SNAP" in win.map_view._well_marker_items

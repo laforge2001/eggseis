@@ -92,3 +92,40 @@ def test_map_view_show_slice_without_volume_is_safe(qtbot):
     w = MapViewWidget()
     qtbot.addWidget(w)
     w.show_slice("inline", 0)  # must not raise
+
+
+def test_add_well_marker_creates_scatter_item(qtbot, fake_backend):
+    from eggseis.data import SeismicVolume
+    from eggseis.viewers.map_view import MapViewWidget
+
+    map_view = MapViewWidget()
+    qtbot.addWidget(map_view)
+    map_view.set_volume(SeismicVolume(fake_backend))
+    map_view.add_well_marker("WX", (310.0, 110.0))
+    assert "WX" in map_view._well_marker_items
+    assert map_view._well_positions["WX"] == (310.0, 110.0)
+
+
+def test_remove_well_marker_drops_entry(qtbot, fake_backend):
+    from eggseis.data import SeismicVolume
+    from eggseis.viewers.map_view import MapViewWidget
+
+    map_view = MapViewWidget()
+    qtbot.addWidget(map_view)
+    map_view.set_volume(SeismicVolume(fake_backend))
+    map_view.add_well_marker("WX", (310.0, 110.0))
+    map_view.remove_well_marker("WX")
+    assert "WX" not in map_view._well_marker_items
+
+
+def test_set_volume_clears_well_markers(qtbot, fake_backend):
+    from eggseis.data import SeismicVolume
+    from eggseis.viewers.map_view import MapViewWidget
+
+    map_view = MapViewWidget()
+    qtbot.addWidget(map_view)
+    vol = SeismicVolume(fake_backend)
+    map_view.set_volume(vol)
+    map_view.add_well_marker("WX", (310.0, 110.0))
+    map_view.set_volume(vol)  # re-bind, should clear markers
+    assert map_view._well_marker_items == {}

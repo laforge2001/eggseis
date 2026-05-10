@@ -49,9 +49,16 @@ class MapViewWidget(QWidget):
 
         self._axis: Axis = Axis.INLINE
         self._index: int = 0
+        # Per-well scatter items keyed by well name, plus surface_xy lookup
+        # for click-to-navigate hit testing.
+        self._well_marker_items: dict[str, pg.ScatterPlotItem] = {}
+        self._well_positions: dict[str, tuple[float, float]] = {}
         self._plot.scene().sigMouseClicked.connect(self._on_mouse_click)
 
     def set_volume(self, volume: SeismicVolume) -> None:
+        # Switching surveys wipes well state from the viewer — clear markers
+        # so we don't leave stale dots from the previous volume.
+        self.clear_well_markers()
         self._volume = volume
         g = volume.geometry
         # Outline: rectangle at (xline, inline) corners.
@@ -97,6 +104,34 @@ class MapViewWidget(QWidget):
             # Timeslice — no x/y position to highlight; clear.
             self._slice_indicator.setData(x=[], y=[])
 
+    def add_well_marker(self, name: str, surface_xy: tuple[float, float]) -> None:
+        """Drop or replace a dot at the well's surface_xy on the plan view."""
+        color = "#5c9eff" if is_dark_mode() else "#2566c8"
+        item = pg.ScatterPlotItem(
+            x=[surface_xy[0]],
+            y=[surface_xy[1]],
+            size=12,
+            symbol="o",
+            brush=color,
+            pen=pg.mkPen(color, width=1.5),
+        )
+        prev = self._well_marker_items.pop(name, None)
+        if prev is not None:
+            self._plot.removeItem(prev)
+        self._plot.addItem(item)
+        self._well_marker_items[name] = item
+        self._well_positions[name] = (float(surface_xy[0]), float(surface_xy[1]))
+
+    def remove_well_marker(self, name: str) -> None:
+        item = self._well_marker_items.pop(name, None)
+        if item is not None:
+            self._plot.removeItem(item)
+        self._well_positions.pop(name, None)
+
+    def clear_well_markers(self) -> None:
+        for name in list(self._well_marker_items.keys()):
+            self.remove_well_marker(name)
+
     def _on_mouse_click(self, evt) -> None:
         if self._volume is None or not evt.double():
             return
@@ -106,9 +141,25 @@ class MapViewWidget(QWidget):
         if not vb.sceneBoundingRect().contains(pos):
             return
         data_pt = vb.mapSceneToView(pos)
-        x_xline = round(data_pt.x())
-        y_inline = round(data_pt.y())
-        # Decide which axis to step based on current axis.
+        click_xline = data_pt.x()
+        click_inline = data_pt.y()
+        # Snap to nearest well if within 5 grid units (in data coords).
+        nearest_name = None
+        nearest_dist = float("inf")
+        for name, (xl, il) in self._well_positions.items():
+            d = ((xl - click_xline) ** 2 + (il - click_inline) ** 2) ** 0.5
+            if d < nearest_dist:
+                nearest_dist = d
+                nearest_name = name
+        if nearest_name is not None and nearest_dist < 5.0:
+            _wxl, wil = self._well_positions[nearest_name]
+            # Send the section to the well's inline (default for vertical wells).
+            self.sliceRequested.emit("inline", round(wil))
+            return
+        # Fallback: existing behavior — snap to integer grid, drive section
+        # axis from the current map axis.
+        x_xline = round(click_xline)
+        y_inline = round(click_inline)
         if self._axis is Axis.INLINE:
             self.sliceRequested.emit("inline", int(y_inline))
         elif self._axis is Axis.XLINE:

@@ -299,6 +299,7 @@ class MainWindow(QMainWindow):
             if self.section_viewer.geometry else 1.0
         )
         self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+        self._snap_section_to_well(well)
         # Reveal the log lane.
         self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
         self.statusBar().showMessage(f"Loaded well {name}", 3000)
@@ -490,6 +491,7 @@ class MainWindow(QMainWindow):
                 if self.section_viewer.geometry else 1.0
             )
             self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+            self._snap_section_to_well(well)
         if self._project.open_wells:
             self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
 
@@ -745,6 +747,23 @@ class MainWindow(QMainWindow):
         """Sizes for the central splitter when the well log lane is visible."""
         return [220, 500, 320, 200]
 
+    def _snap_section_to_well(self, well) -> None:
+        """Jump the section viewer to the well's inline and drop a map marker.
+
+        Called whenever a well becomes visible (import, tree double-click, or
+        project restore) so the overlay is immediately on-screen instead of
+        hidden on some unrelated inline.
+        """
+        target_inline = round(well.surface_xy[1])
+        geom = self.section_viewer.geometry
+        if (
+            geom is not None
+            and geom.inline_min <= target_inline <= geom.inline_max
+        ):
+            self.slice_nav.set_axis_and_index("inline", target_inline)
+        # Drop a marker on the map view too.
+        self.map_view.add_well_marker(well.name, well.surface_xy)
+
     def _on_import_well(self) -> None:
         from eggseis.data.well import import_las
 
@@ -777,6 +796,7 @@ class MainWindow(QMainWindow):
             else 1.0
         )
         self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+        self._snap_section_to_well(well)
         # Make the well log lane visible.
         self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
         if self._project is not None:
