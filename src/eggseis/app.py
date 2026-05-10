@@ -579,8 +579,12 @@ class MainWindow(QMainWindow):
 
         # Restore persisted theme (saved under viewer["theme"]).
         viewer = self._project.viewer or {}
-        if viewer.get("theme") in ("dark", "light"):
-            apply_theme(Theme(viewer["theme"]))
+        saved_theme = viewer.get("theme")
+        if saved_theme is not None:
+            try:
+                apply_theme(Theme(saved_theme))
+            except ValueError:
+                pass  # unknown value persisted; keep current theme
 
         # Add to recent ledger — accept absolute path string for portability.
         add_recent(str(Path(path).resolve()))
