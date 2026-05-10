@@ -608,3 +608,30 @@ def test_open_project_appends_to_recent(qtbot, demo_project_path, tmp_path, monk
     win.open_project(demo_project_path)
     paths = [r["path"] for r in load_recent()]
     assert str(demo_project_path) in paths
+
+
+def test_theme_persists_in_project_yaml(qtbot, demo_project_path, tmp_path):
+    """View → Theme + save → reopen restores the chosen theme."""
+    import shutil
+
+    from eggseis.style import Theme, apply_theme, current_mode
+
+    project_copy = tmp_path / "proj"
+    shutil.copytree(demo_project_path, project_copy)
+
+    # Reset state to a known starting point.
+    apply_theme(Theme.DARK)
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(project_copy)
+    win._on_toggle_theme()
+    chosen = current_mode()
+    win._on_save_project()
+
+    apply_theme(Theme.DARK)  # ensure round-trip is real, not residual
+
+    win2 = MainWindow()
+    qtbot.addWidget(win2)
+    win2.open_project(project_copy)
+    assert current_mode() is chosen

@@ -53,7 +53,7 @@ class WelcomeWidget(QWidget):
         self._recent_list = QListWidget()
         self._recent_list.setMaximumHeight(120)
         self._recent_list.itemClicked.connect(self._on_recent_clicked)
-        self._populate_recent()
+        self.refresh()
 
         layout.addStretch(1)
         layout.addWidget(glyph)
@@ -65,7 +65,7 @@ class WelcomeWidget(QWidget):
         layout.addWidget(self._recent_list)
         layout.addStretch(1)
 
-    def _populate_recent(self) -> None:
+    def refresh(self) -> None:
         self._recent_list.clear()
         for entry in load_recent():
             path = entry["path"]

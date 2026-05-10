@@ -212,6 +212,10 @@ class MainWindow(QMainWindow):
         self._action_save_project = QAction("&Save Project", self)
         self._action_save_project.triggered.connect(self._on_save_project)
         m_file.addAction(self._action_save_project)
+        self._action_close_project = QAction("Close Project", self)
+        self._action_close_project.triggered.connect(self._on_close_project)
+        self._action_close_project.setEnabled(False)  # enabled only when a project is loaded
+        m_file.addAction(self._action_close_project)
         m_file.addSeparator()
         m_file.addAction(a_quit)
 
@@ -418,11 +422,16 @@ class MainWindow(QMainWindow):
 
     def _show_welcome(self) -> None:
         """Swap central back to the welcome widget (e.g. on close project)."""
-        self._welcome._populate_recent()
+        self._welcome.refresh()
         self.setCentralWidget(self._welcome)
         self._toolbar.set_project_loaded(False)
         self._status.set_project_name(None)
         self._status.set_cursor(None, None, None)
+
+    def _on_close_project(self) -> None:
+        self._project = None
+        self._show_welcome()
+        self._action_close_project.setEnabled(False)
 
     def _show_main_split(self) -> None:
         """Swap the welcome widget out for the 4-pane splitter."""
@@ -564,6 +573,7 @@ class MainWindow(QMainWindow):
         # Empty-state → main 4-pane: keep this BEFORE any open_survey call
         # so the central widget hierarchy is correct when widgets re-bind.
         self._show_main_split()
+        self._action_close_project.setEnabled(True)
         self._status.set_project_name(self._project.name)
         _apply_tree_icons(self.tree)
 
@@ -573,7 +583,7 @@ class MainWindow(QMainWindow):
             apply_theme(Theme(viewer["theme"]))
 
         # Add to recent ledger — accept absolute path string for portability.
-        add_recent(str(Path(path).resolve() if not isinstance(path, Path) else path))
+        add_recent(str(Path(path).resolve()))
 
         # Auto-restore the previously-active survey if the saved graph
         # tagged one. Status-bar hint so users know what happened.
@@ -963,12 +973,17 @@ class MainWindow(QMainWindow):
             if self._active_survey_id else None
         )
         graph_dict = graph.to_dict() if graph is not None else None
+        existing_viewer = dict(self._project.viewer or {})
         viewer_state = {
             "axis": self.section_viewer.current_axis,
             "index": self.section_viewer.current_index,
             "colormap": self.section_viewer.lut_name,
             "levels_locked": self.section_viewer.levels_locked,
         }
+        # Preserve keys set elsewhere (e.g. theme toggled via View → Theme).
+        for key in ("theme", "section_cmap_overrides"):
+            if key in existing_viewer:
+                viewer_state[key] = existing_viewer[key]
         proj = self._project
         if graph_dict is not None and self._active_survey_name is not None:
             proj = proj.with_graph(
