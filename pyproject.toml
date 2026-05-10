@@ -81,6 +81,7 @@ ignore = ["RUF001", "RUF002", "RUF003"]  # allow en-dash, ×, etc. in user-facin
 "src/eggseis/compute/*.py" = ["N815"]  # Qt signals are camelCase by convention
 "src/eggseis/pipeline/*.py" = ["N815"]  # Qt signals are camelCase by convention
 "src/eggseis/graph/*.py" = ["N815"]  # Qt signals are camelCase by convention
+"src/eggseis/style/*.py" = ["N815"]  # Qt signals are camelCase by convention
 "src/eggseis/graph/canvas.py" = ["N815", "RUF012"]  # qtpynodeeditor NodeDataModel API requires class-level dicts
 "examples/canvas_spike.py" = ["RUF012"]  # qtpynodeeditor NodeDataModel API requires class-level dicts
 

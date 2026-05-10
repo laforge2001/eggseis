@@ -45,8 +45,28 @@ _DARK = {
 }
 
 
+_ACTIVE_MODE_OVERRIDE: str | None = None
+
+
+def set_active_mode(mode: str | None) -> None:
+    """Force colors() to return DARK or LIGHT regardless of system palette.
+
+    Used by eggseis.style.apply_theme so override QSS substitutions and
+    in-process viewer queries stay consistent with the active theme.
+    Pass None to revert to system-palette detection.
+    """
+    global _ACTIVE_MODE_OVERRIDE
+    _ACTIVE_MODE_OVERRIDE = mode
+
+
 def is_dark_mode() -> bool:
-    """True when the system palette indicates a dark theme."""
+    """True when active theme is dark.
+
+    Active theme = explicit override (eggseis.style.apply_theme) or, if
+    nothing has applied a theme yet, system palette lightness.
+    """
+    if _ACTIVE_MODE_OVERRIDE is not None:
+        return _ACTIVE_MODE_OVERRIDE == "dark"
     palette = QGuiApplication.palette()
     bg = palette.color(QPalette.ColorRole.Window)
     return bg.lightness() < 128
