@@ -34,6 +34,7 @@
 - On milestone completion, follow the wrap-up rule (see memory): audit ROADMAP exit criteria → CHANGELOG entry → README status → next-milestone issue + branch → tag after merge.
 - Pre-commit hook in `.githooks/pre-commit` auto-refreshes the M2 screenshot when UI sources are staged. Enable per-clone via `./scripts/test.sh hooks`.
 - **GUI screenshot rule:** any substantial GUI change MUST regenerate `docs/m2-screenshot.png` before commit. Run `./scripts/test.sh shot` and stage the PNG alongside the source change. Don't rely on the pre-commit hook — verify the screenshot reflects the new state. Substantial = new dock, new menu, layout shift, new widget, anything visible from the rendered window.
+- **UX aesthetic:** target visual bar = PaleoScan. Modern flat design, dark-theme bias, low chrome (no counts/badges/labels unless functional), smooth interactions, geoscience-aware defaults (perceptually uniform/diverging colormaps; high-contrast active states). Ask "would this fit in PaleoScan?" before adding visual elements. The audience is geoscientists comparing against Petrel / OpendTect / PaleoScan; janky-looking GUI loses them.
 
 ## Dev doc
 - `docs/development.md` — local workflow, headless mechanics, shortcuts, troubleshooting. Cross-link from any new contributor-facing change.

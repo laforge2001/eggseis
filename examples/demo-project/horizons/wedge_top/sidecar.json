@@ -1,0 +1,11 @@
+{
+  "name": "wedge_top",
+  "geometry_ref": "(detached)",
+  "color": "#ffcc00",
+  "picker": "",
+  "unit": "ms",
+  "inline_min": 100,
+  "xline_min": 300,
+  "inline_step": 1,
+  "xline_step": 1
+}

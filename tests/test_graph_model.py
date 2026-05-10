@@ -353,7 +353,7 @@ def test_to_dict_from_dict_round_trip(linear_spec, subtract_spec):
 
     d = g.to_dict()
     registry = {linear_spec.id: linear_spec, subtract_spec.id: subtract_spec}
-    g2 = Graph.from_dict(d, registry)
+    g2 = Graph.from_dict(d, plugins=registry)
 
     assert set(g2.nodes.keys()) == set(g.nodes.keys())
     assert g2.tap_port == g.tap_port
@@ -369,7 +369,7 @@ def test_from_dict_unknown_plugin_raises(linear_spec):
     g.add_node(n)
     d = g.to_dict()
     with pytest.raises(OrphanPluginError):
-        Graph.from_dict(d, registry={})
+        Graph.from_dict(d, plugins={})
 
 
 # --- module exports ----------------------------------------------------

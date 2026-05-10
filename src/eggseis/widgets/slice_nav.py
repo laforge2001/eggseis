@@ -63,3 +63,17 @@ class SliceNavigator(QWidget):
         if self._geom is None:
             return  # shortcuts may fire before any project is loaded
         self.axis.setCurrentText(axis)
+
+    def set_axis_and_index(self, axis: str, index: int) -> None:
+        """Switch axis and jump to the given index.
+
+        The combo's currentTextChanged handler reseeds the spinbox to the
+        axis lower bound; we then write the requested index, which the
+        spinbox clamps to its valid range and emits sliceChanged.
+        """
+        if axis not in AXES:
+            raise ValueError(f"Unknown axis {axis!r}; expected one of {AXES}")
+        if self._geom is None:
+            return
+        self.axis.setCurrentText(axis)
+        self.spinbox.setValue(int(index))

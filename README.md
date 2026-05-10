@@ -113,7 +113,7 @@ The roadmap is:
 - **M4** — Compute engine *(complete, [v0.1.0a4](CHANGELOG.md); threading, debounce, in-memory cache)*
 - **M5** — Pipeline chain *(complete, [v0.1.0a5](CHANGELOG.md); list-style dock, tap-anywhere, lazy recompute, chain_hash cache)*
 - **M6** — Plugin graphs *(complete, [v0.1.0a6](CHANGELOG.md); DAG topology, multi-input plugins, qtpynodeeditor visual canvas, port_hash cache, tap any output port)*
-- **M7** — Horizons and wells
+- **M7** — Horizons and wells *(complete, [v0.1.0a7](CHANGELOG.md); horizon + well import, overlays, map view, project save/load with graph + viewer state, header editor, streaming export)*
 - **M8** — Volume viewer
 - **M9** — Crossplot
 - **M10** — Private alpha with early users

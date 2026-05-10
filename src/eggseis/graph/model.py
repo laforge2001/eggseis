@@ -18,7 +18,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -48,6 +48,23 @@ class OrphanPluginError(KeyError):
     """Raised by `Graph.from_dict` when a plugin id is missing from the registry."""
 
 
+class OrphanHorizonError(KeyError):
+    """Raised by Graph.from_dict when a horizon name is missing from the registry."""
+
+
+@dataclass(frozen=True)
+class Association:
+    """Dashed-reference link from a horizon node to its bound Source.
+
+    v1.0 has only the implicit Source so source_node_id defaults to SOURCE_ID.
+    Multi-source graphs (M7+) will let a single project carry multiple Sources;
+    each horizon associates with exactly one of them.
+    """
+
+    horizon_node_id: str
+    source_node_id: str = SOURCE_ID
+
+
 @dataclass(frozen=True)
 class Edge:
     src_node_id: str
@@ -58,11 +75,27 @@ class Edge:
 
 @dataclass
 class Node:
-    spec: PluginSpec
-    params: BaseModel
+    spec: PluginSpec | None
+    params: BaseModel | None = None
     enabled: bool = True
     pos: tuple[float, float] = (0.0, 0.0)
     node_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    kind: Literal["plugin", "horizon"] = "plugin"
+    horizon_name: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "plugin":
+            if self.spec is None:
+                raise ValueError("plugin nodes require a spec")
+            if self.horizon_name is not None:
+                raise ValueError("plugin nodes must not set horizon_name")
+        elif self.kind == "horizon":
+            if self.horizon_name is None:
+                raise ValueError("horizon nodes require horizon_name")
+            if self.spec is not None or self.params is not None:
+                raise ValueError("horizon nodes must not set spec or params")
+        else:
+            raise ValueError(f"unknown Node kind {self.kind!r}")
 
 
 @dataclass
@@ -70,6 +103,8 @@ class Graph:
     nodes: dict[str, Node] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
     tap_port: tuple[str, str] = (SOURCE_ID, "inline")
+    associations: list[Association] = field(default_factory=list)
+    pinned_overlays: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self._undo: list[tuple] = []
@@ -88,6 +123,84 @@ class Graph:
         self.nodes[node.node_id] = node
         self._record(("remove_node", node.node_id))
 
+    def add_horizon_node(
+        self,
+        horizon_name: str,
+        *,
+        pos: tuple[float, float] = (0.0, 0.0),
+    ) -> str:
+        node = Node(
+            spec=None,
+            params=None,
+            kind="horizon",
+            horizon_name=horizon_name,
+            pos=pos,
+        )
+        self.nodes[node.node_id] = node
+        self.associations.append(
+            Association(horizon_node_id=node.node_id, source_node_id=SOURCE_ID)
+        )
+        self.pinned_overlays.add(node.node_id)
+        # Inverse: remove the node, drop its association + pin (handled in
+        # remove_node's standard cleanup path via _apply_inverse).
+        self._record(("remove_node", node.node_id))
+        return node.node_id
+
+    def pin_overlay(self, node_id: str) -> None:
+        """Mark a horizon node as pinned (overlay rendered on the section viewer).
+
+        Raises KeyError if `node_id` is unknown, ValueError if the node is not
+        a horizon kind. Use `unpin_overlay` to remove (idempotent — silent on
+        unknown ids).
+        """
+        node = self.nodes[node_id]
+        if node.kind != "horizon":
+            raise ValueError(
+                f"pin_overlay: node {node_id!r} kind={node.kind!r} (expected horizon)"
+            )
+        self.pinned_overlays.add(node_id)
+
+    def unpin_overlay(self, node_id: str) -> None:
+        """Remove a horizon node from the pinned set. Idempotent — silent
+        if the id is unknown or the node was never pinned."""
+        self.pinned_overlays.discard(node_id)
+
+    def disconnect_horizon(self, horizon_node_id: str) -> None:
+        """Drop the Association linking a horizon node to its Source.
+
+        Idempotent — silent if the horizon was already disconnected. Pinned
+        state is preserved; the overlay stops rendering because
+        `visible_horizons_for_tap` filters by association membership.
+        """
+        before = list(self.associations)
+        self.associations = [
+            a for a in self.associations if a.horizon_node_id != horizon_node_id
+        ]
+        if before != self.associations:
+            self._record(("connect_horizon", horizon_node_id, SOURCE_ID))
+
+    def connect_horizon(self, horizon_node_id: str, source_node_id: str = SOURCE_ID) -> None:
+        """Add (or replace) the Association linking a horizon to a Source.
+
+        Raises KeyError if `horizon_node_id` is not a horizon-kind node in
+        the graph. Multiple associations to different Sources for the same
+        horizon are not allowed in v1.0.
+        """
+        node = self.nodes[horizon_node_id]
+        if node.kind != "horizon":
+            raise ValueError(
+                f"connect_horizon: node {horizon_node_id!r} kind={node.kind!r} "
+                f"(expected horizon)"
+            )
+        # Remove any prior association for this horizon.
+        self.associations = [
+            a for a in self.associations if a.horizon_node_id != horizon_node_id
+        ]
+        self.associations.append(
+            Association(horizon_node_id=horizon_node_id, source_node_id=source_node_id)
+        )
+        self._record(("disconnect_horizon", horizon_node_id))
+
     def remove_node(self, node_id: str) -> None:
         if node_id == SOURCE_ID:
             raise ValueError("cannot remove implicit Source node")
@@ -96,7 +209,26 @@ class Graph:
         self.edges = [e for e in self.edges if e not in removed_edges]
         if self.tap_port[0] == node_id:
             self.tap_port = (SOURCE_ID, "inline")
-        self._record(("add_node_full", node, list(removed_edges), self.tap_port))
+        removed_associations = [
+            a for a in self.associations
+            if a.horizon_node_id == node_id or a.source_node_id == node_id
+        ]
+        self.associations = [
+            a for a in self.associations
+            if a.horizon_node_id != node_id and a.source_node_id != node_id
+        ]
+        was_pinned = node_id in self.pinned_overlays
+        self.pinned_overlays.discard(node_id)
+        self._record(
+            (
+                "add_node_full",
+                node,
+                list(removed_edges),
+                self.tap_port,
+                removed_associations,
+                was_pinned,
+            )
+        )
 
     def connect(self, edge: Edge) -> None:
         self._validate_edge(edge)
@@ -217,6 +349,32 @@ class Graph:
                     stack.append(e.src_node_id)
         # Topo sort within the cone.
         return self._topo_sort(cone)
+
+    def visible_horizons_for_tap(
+        self, tap_node: str, tap_port: str
+    ) -> list[str]:
+        """Return horizon node_ids whose Source is upstream of (tap_node, tap_port)
+        AND that are pinned.
+
+        v1.0: only one Source exists, and Source is in every cone, so this
+        reduces to "every pinned horizon node currently in the graph".
+        Locked now to keep the contract right when multi-source lands.
+        """
+        if not self.pinned_overlays:
+            return []
+        if tap_node == SOURCE_ID:
+            cone: set[str] = {SOURCE_ID}
+        else:
+            cone = set(self.upstream_cone(tap_node, tap_port))
+        visible = []
+        for nid in self.pinned_overlays:
+            assoc = next(
+                (a for a in self.associations if a.horizon_node_id == nid),
+                None,
+            )
+            if assoc is not None and assoc.source_node_id in cone:
+                visible.append(nid)
+        return visible
 
     def _topo_sort(self, ids: set[str]) -> list[str]:
         in_degree: dict[str, int] = {nid: 0 for nid in ids}
@@ -349,12 +507,16 @@ class Graph:
             "nodes": {nid: copy.copy(n) for nid, n in self.nodes.items()},
             "edges": list(self.edges),
             "tap_port": self.tap_port,
+            "associations": list(self.associations),
+            "pinned_overlays": set(self.pinned_overlays),
         }
 
     def _restore(self, snap: dict) -> None:
         self.nodes = {nid: copy.copy(n) for nid, n in snap["nodes"].items()}
         self.edges = list(snap["edges"])
         self.tap_port = snap["tap_port"]
+        self.associations = list(snap.get("associations", []))
+        self.pinned_overlays = set(snap.get("pinned_overlays", set()))
 
     def _apply_inverse(self, op: tuple) -> None:
         kind = op[0]
@@ -364,12 +526,25 @@ class Graph:
                 e for e in self.edges
                 if e.src_node_id != op[1] and e.dst_node_id != op[1]
             ]
+            # Drop any association referencing this node + any pin entry.
+            self.associations = [
+                a for a in self.associations
+                if a.horizon_node_id != op[1] and a.source_node_id != op[1]
+            ]
+            self.pinned_overlays.discard(op[1])
         elif kind == "add_node_full":
             node, edges, tap = op[1], op[2], op[3]
             self.nodes[node.node_id] = copy.copy(node)
             for e in edges:
                 self.edges.append(e)
             self.tap_port = tap
+            # Restore associations + pin (Task 2 horizon support; older tuples
+            # without these fields skip silently).
+            if len(op) >= 5:
+                for a in op[4]:
+                    self.associations.append(a)
+            if len(op) >= 6 and op[5]:
+                self.pinned_overlays.add(node.node_id)
         elif kind == "disconnect_full":
             edge, prior = op[1], op[2]
             if edge in self.edges:
@@ -384,24 +559,41 @@ class Graph:
             self.nodes[op[1]].enabled = op[2]
         elif kind == "set_tap":
             self.tap_port = op[1]
+        elif kind == "disconnect_horizon":
+            self.associations = [
+                a for a in self.associations if a.horizon_node_id != op[1]
+            ]
+        elif kind == "connect_horizon":
+            self.associations.append(
+                Association(horizon_node_id=op[1], source_node_id=op[2])
+            )
         else:
             raise AssertionError(f"unknown undo op: {kind}")
 
     # --- serialisation ----------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "nodes": [
-                {
+        node_dicts = []
+        for n in self.nodes.values():
+            if n.kind == "horizon":
+                node_dicts.append({
                     "node_id": n.node_id,
+                    "kind": "horizon",
+                    "horizon_name": n.horizon_name,
+                    "pos": list(n.pos),
+                })
+            else:
+                node_dicts.append({
+                    "node_id": n.node_id,
+                    "kind": "plugin",
                     "plugin_id": n.spec.id,
                     "plugin_version": n.spec.version,
                     "params": n.params.model_dump(),
                     "enabled": n.enabled,
                     "pos": list(n.pos),
-                }
-                for n in self.nodes.values()
-            ],
+                })
+        return {
+            "nodes": node_dicts,
             "edges": [
                 {
                     "src_node_id": e.src_node_id,
@@ -412,24 +604,50 @@ class Graph:
                 for e in self.edges
             ],
             "tap_port": list(self.tap_port),
+            "associations": [
+                {"horizon_node_id": a.horizon_node_id, "source_node_id": a.source_node_id}
+                for a in self.associations
+            ],
+            "pinned_overlays": sorted(self.pinned_overlays),
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any], registry: dict[str, PluginSpec]) -> Graph:
+    def from_dict(
+        cls,
+        d: dict[str, Any],
+        *,
+        plugins: dict[str, PluginSpec],
+        horizons: dict[str, Any] | None = None,
+    ) -> Graph:
         g = cls()
         for node_dict in d["nodes"]:
-            plugin_id = node_dict["plugin_id"]
-            spec = registry.get(plugin_id)
-            if spec is None:
-                raise OrphanPluginError(plugin_id)
-            params = spec.param_model(**node_dict["params"])
-            node = Node(
-                spec=spec,
-                params=params,
-                enabled=node_dict.get("enabled", True),
-                pos=tuple(node_dict.get("pos", (0.0, 0.0))),
-                node_id=node_dict["node_id"],
-            )
+            kind = node_dict.get("kind", "plugin")
+            if kind == "horizon":
+                horizon_name = node_dict["horizon_name"]
+                if horizons is None or horizon_name not in horizons:
+                    raise OrphanHorizonError(horizon_name)
+                node = Node(
+                    spec=None,
+                    params=None,
+                    kind="horizon",
+                    horizon_name=horizon_name,
+                    pos=tuple(node_dict.get("pos", (0.0, 0.0))),
+                    node_id=node_dict["node_id"],
+                )
+            else:
+                plugin_id = node_dict["plugin_id"]
+                spec = plugins.get(plugin_id)
+                if spec is None:
+                    raise OrphanPluginError(plugin_id)
+                params = spec.param_model(**node_dict["params"])
+                node = Node(
+                    spec=spec,
+                    params=params,
+                    enabled=node_dict.get("enabled", True),
+                    pos=tuple(node_dict.get("pos", (0.0, 0.0))),
+                    node_id=node_dict["node_id"],
+                    kind="plugin",
+                )
             g.nodes[node.node_id] = node
         for edge_dict in d["edges"]:
             g.edges.append(
@@ -441,6 +659,14 @@ class Graph:
                 )
             )
         g.tap_port = tuple(d.get("tap_port", (SOURCE_ID, "inline")))
+        for a in d.get("associations", []):
+            g.associations.append(
+                Association(
+                    horizon_node_id=a["horizon_node_id"],
+                    source_node_id=a["source_node_id"],
+                )
+            )
+        g.pinned_overlays = set(d.get("pinned_overlays", []))
         # Skip undo recording for the load path.
         g._undo.clear()
         g._redo.clear()

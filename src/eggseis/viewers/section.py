@@ -5,11 +5,19 @@ from __future__ import annotations
 import numpy as np
 import pyqtgraph as pg
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from eggseis.axes import Axis
 from eggseis.colormaps import get_lut
 from eggseis.data import SeismicVolume
+from eggseis.data.horizon import Horizon
+from eggseis.data.well import Well
+from eggseis.viewers.horizon_overlay import (
+    inline_polyline_points,
+    xline_polyline_points,
+)
+from eggseis.viewers.theme import apply_to_plot_widget
+from eggseis.viewers.theme import colors as _theme_colors
 
 DEFAULT_LUT = "gray"
 _MOUSE_RATE_HZ = 60
@@ -25,12 +33,21 @@ class SectionViewer(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._plot = pg.PlotWidget()
-        self._plot.setBackground("w")
+        apply_to_plot_widget(self._plot)
         self._plot.invertY(True)
         self._image = pg.ImageItem(axisOrder="row-major")
         self._plot.addItem(self._image)
         self._vb = self._plot.getPlotItem().vb
         layout.addWidget(self._plot)
+
+        # Transient warning banner for "horizon not visible" / similar UX hints.
+        self._status_label = QLabel("")
+        self._status_label.setStyleSheet(
+            f"QLabel {{ color: {_theme_colors()['warning']}; "
+            f"padding: 2px 6px; font-size: 11px; }}"
+        )
+        self._status_label.setVisible(False)
+        layout.addWidget(self._status_label)
 
         self._volume: SeismicVolume | None = None
         self._lut_name = DEFAULT_LUT
@@ -51,6 +68,12 @@ class SectionViewer(QWidget):
             rateLimit=_MOUSE_RATE_HZ,
             slot=self._on_mouse_moved,
         )
+
+        # Horizon overlays keyed by horizon name; values hold both the
+        # Horizon model and the pyqtgraph plot item so we can re-render
+        # the polyline on every slice change without re-adding the item.
+        self._horizon_overlays: dict[str, tuple[Horizon, pg.PlotDataItem]] = {}
+        self._well_overlays: dict[str, tuple[Well, pg.PlotDataItem]] = {}
 
     @property
     def current_axis(self) -> str:
@@ -126,10 +149,91 @@ class SectionViewer(QWidget):
         self._partial_overlay = False
         self._baseline_levels = None
         self._render()
+        self._refresh_horizons()
+        self._refresh_wells()
+
+    # --- horizon overlays --------------------------------------------------
+
+    def add_horizon_overlay(self, horizon: Horizon) -> None:
+        item = pg.PlotDataItem(pen=pg.mkPen(horizon.color, width=2))
+        self._plot.addItem(item)
+        self._horizon_overlays[horizon.name] = (horizon, item)
+        self._refresh_horizons()
+
+    def remove_horizon_overlay(self, name: str) -> None:
+        entry = self._horizon_overlays.pop(name, None)
+        if entry is not None:
+            _, item = entry
+            self._plot.removeItem(item)
+
+    def horizon_count(self) -> int:
+        return len(self._horizon_overlays)
+
+    def horizon_overlay_names(self) -> list[str]:
+        return list(self._horizon_overlays.keys())
+
+    # --- well overlays ----------------------------------------------------
+
+    def add_well_overlay(self, well: Well, *, color: str = "#3399ff") -> None:
+        item = pg.PlotDataItem(pen=pg.mkPen(color, width=2), symbol="o", symbolSize=4)
+        self._plot.addItem(item)
+        self._well_overlays[well.name] = (well, item)
+        self._refresh_wells()
+
+    def remove_well_overlay(self, name: str) -> None:
+        entry = self._well_overlays.pop(name, None)
+        if entry is not None:
+            _, item = entry
+            self._plot.removeItem(item)
+
+    def well_count(self) -> int:
+        return len(self._well_overlays)
+
+    def _refresh_wells(self) -> None:
+        if self._volume is None:
+            return
+        geom = self._volume.geometry
+        for well, item in self._well_overlays.values():
+            pts = well.intersect_section(self._axis.value, self._index, geom)
+            if pts.size:
+                item.setData(x=pts[:, 0], y=pts[:, 1])
+            else:
+                item.setData(x=[], y=[])
+
+    def _refresh_horizons(self) -> None:
+        if self._volume is None:
+            return
+        geom = self._volume.geometry
+        for horizon, item in self._horizon_overlays.values():
+            if self._axis is Axis.INLINE:
+                pts = inline_polyline_points(horizon, geom, self._index)
+            elif self._axis is Axis.XLINE:
+                pts = xline_polyline_points(horizon, geom, self._index)
+            else:
+                # Timeslice: no polyline (would need a contour). Hide.
+                item.setData(x=[], y=[])
+                continue
+            if pts.size:
+                item.setData(x=pts[:, 0], y=pts[:, 1])
+            else:
+                item.setData(x=[], y=[])
 
     def set_colormap(self, name: str) -> None:
         self._lut_name = name
         self._image.setLookupTable(get_lut(name))
+
+    # --- transient warning banner ----------------------------------------
+
+    def show_warning(self, text: str) -> None:
+        if not text:
+            self._status_label.setVisible(False)
+            return
+        self._status_label.setText(text)
+        self._status_label.setVisible(True)
+
+    def clear_warning(self) -> None:
+        self._status_label.setVisible(False)
+        self._status_label.setText("")
 
     def _render(self) -> None:
         if self._volume is None:

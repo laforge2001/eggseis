@@ -10,20 +10,24 @@ from eggseis.graph.executor import GraphExecutor
 from eggseis.graph.model import (
     SOURCE_ID,
     SOURCE_PORTS,
+    Association,
     CycleError,
     Edge,
     Graph,
     Node,
+    OrphanHorizonError,
     OrphanPluginError,
 )
 
 __all__ = [
     "SOURCE_ID",
     "SOURCE_PORTS",
+    "Association",
     "CycleError",
     "Edge",
     "Graph",
     "GraphExecutor",
     "Node",
+    "OrphanHorizonError",
     "OrphanPluginError",
 ]

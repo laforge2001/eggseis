@@ -68,7 +68,7 @@ def test_main_window_menus(qtbot):
 
     bar = win.menuBar()
     titles = [a.text().replace("&", "") for a in bar.actions()]
-    assert titles == ["File", "View", "Graph", "Attribute", "Help"]
+    assert titles == ["File", "View", "Survey", "Graph", "Attribute", "Help"]
     _ = Qt
 
 
@@ -365,3 +365,192 @@ def test_graph_subtract_tap_ready(qtbot, demo_project_path):
     with qtbot.waitSignal(win._executor.tapReady, timeout=10_000):
         canvas.set_tap(sub, "out")
     assert win.section_viewer.has_overlay
+
+
+def test_pin_unpin_horizon_node_updates_section_viewer(qtbot, demo_project_path):
+    """Adding a horizon node + pinning shows overlay; unpinning removes it."""
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    survey_item = _find_first_survey_item(win.tree)
+    win.tree.itemDoubleClicked.emit(survey_item, 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Synthetic horizon registered into the project for this test.
+    import numpy as np
+
+    from eggseis.data.horizon import Horizon
+    geom = win.section_viewer.geometry
+    grid = np.full((geom.n_inlines, geom.n_xlines), 50.0, dtype=np.float32)
+    h = Horizon(name="test_top", grid=grid, geometry_ref="x")
+    target = win._project.root / "horizons" / "test_top"
+    h.save(target)
+
+    from eggseis.project import HorizonEntry
+    win._project = win._project.with_horizon_added(
+        HorizonEntry(name="test_top", path=target)
+    )
+    win._canvas.register_horizons([h.name for h in win._project.horizons])
+
+    nid = win._canvas.add_horizon_node("test_top")
+    qtbot.wait(50)  # let signal-driven sync run
+    assert "test_top" in win.section_viewer.horizon_overlay_names()
+
+    win._canvas.set_horizon_pinned(nid, False)
+    qtbot.wait(50)
+    assert "test_top" not in win.section_viewer.horizon_overlay_names()
+
+
+def test_double_click_well_in_tree_loads_into_viewer(qtbot, demo_project_path):
+    """Double-click on a well item in the tree adds it to the section viewer
+    and populates the log panel."""
+    import numpy as np
+
+    from eggseis.data.well import Well
+    from eggseis.project import WellEntry
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Add a synthetic well to the project + save to disk.
+    md = np.linspace(0.0, 200.0, 5, dtype=np.float32)
+    dev = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
+    well = Well(
+        name="WTEST",
+        deviation=dev,
+        logs={"GR": np.array([55.0, 60.0, 65.0, 70.0, 75.0], dtype=np.float32)},
+        markers=[],
+        surface_xy=(0.0, 0.0),
+    )
+    target = win._project.root / "wells" / "WTEST.h5"
+    well.save(target)
+    win._project = win._project.with_well_added(WellEntry(name="WTEST", path=target))
+    win.tree.set_project(win._project)
+
+    # Find the new well item under the Wells category.
+    project_root = win.tree.topLevelItem(0)
+    wells_group = project_root.child(2)  # 0=Surveys, 1=Horizons, 2=Wells
+    assert wells_group.text(0) == "Wells"
+    well_item = None
+    for i in range(wells_group.childCount()):
+        if wells_group.child(i).text(0) == "WTEST":
+            well_item = wells_group.child(i)
+            break
+    assert well_item is not None
+
+    win.tree.itemDoubleClicked.emit(well_item, 0)
+    qtbot.wait(50)
+    assert "WTEST" in win.section_viewer._well_overlays
+    assert win.well_log_panel.selected_curve() == "GR"
+
+
+def test_open_project_auto_opens_active_survey(qtbot, demo_project_path):
+    """Opening a project that has a saved active_survey re-opens it
+    and applies viewer state without explicit user action."""
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    # Manually open survey + save with viewer state.
+    survey_item = _find_first_survey_item(win.tree)
+    win.tree.itemDoubleClicked.emit(survey_item, 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+    win.section_viewer.show_slice("xline", win.section_viewer.geometry.xline_min + 5)
+    win.set_colormap("seismic")
+    # _on_save_project requires a graph + active_survey to set graph_dict.
+    # The graph already has active_survey wired through open_survey, so just save.
+    win._on_save_project()
+    qtbot.wait(50)
+
+    # Re-open in a fresh window.
+    win2 = MainWindow()
+    qtbot.addWidget(win2)
+    win2.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win2.section_viewer.has_volume, timeout=2000)
+    assert win2.section_viewer.current_axis == "xline"
+    assert win2.section_viewer.lut_name == "seismic"
+
+
+def test_open_project_restores_loaded_wells(qtbot, demo_project_path):
+    """If a project saved with open_wells, those wells reappear on load."""
+    import numpy as np
+
+    from eggseis.data.well import Well
+    from eggseis.project import WellEntry
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    # Synthesise + persist a well, register in project, save.
+    md = np.linspace(0.0, 100.0, 3, dtype=np.float32)
+    dev = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
+    well = Well(name="WX", deviation=dev, logs={"GR": md.copy()}, markers=[], surface_xy=(0.0, 0.0))
+    target = win._project.root / "wells" / "WX.h5"
+    well.save(target)
+    win._project = win._project.with_well_added(WellEntry(name="WX", path=target))
+    win.section_viewer.add_well_overlay(well)
+    win._on_save_project()
+    qtbot.wait(50)
+
+    win2 = MainWindow()
+    qtbot.addWidget(win2)
+    win2.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win2.section_viewer.has_volume, timeout=2000)
+    qtbot.wait(50)  # let restore handlers run
+    assert "WX" in win2.section_viewer._well_overlays
+
+
+def test_well_load_auto_snaps_section_to_well_inline(qtbot, demo_project_path):
+    """Loading a well jumps the section to that well's inline."""
+    import numpy as np
+
+    from eggseis.data.well import Well
+    from eggseis.project import WellEntry
+
+    win = MainWindow()
+    qtbot.addWidget(win)
+    win.open_project(demo_project_path)
+    qtbot.waitUntil(lambda: win.tree.topLevelItemCount() > 0, timeout=2000)
+    win.tree.itemDoubleClicked.emit(_find_first_survey_item(win.tree), 0)
+    qtbot.waitUntil(lambda: win.section_viewer.has_volume, timeout=2000)
+
+    geom = win.section_viewer.geometry
+    target_inline = geom.inline_min + 5
+    md = np.array([0.0, 100.0, 200.0], dtype=np.float32)
+    dev = np.column_stack([md, np.zeros_like(md), np.zeros_like(md)]).astype(np.float32)
+    well = Well(
+        name="SNAP",
+        deviation=dev,
+        logs={"GR": np.array([55.0, 60.0, 65.0], dtype=np.float32)},
+        markers=[],
+        surface_xy=(geom.xline_min + 3.0, float(target_inline)),
+    )
+    target = win._project.root / "wells" / "SNAP.h5"
+    well.save(target)
+    win._project = win._project.with_well_added(WellEntry(name="SNAP", path=target))
+    win.tree.set_project(win._project)
+
+    # Trigger via tree double-click.
+    project_root = win.tree.topLevelItem(0)
+    wells_group = project_root.child(2)
+    well_item = None
+    for i in range(wells_group.childCount()):
+        if wells_group.child(i).text(0) == "SNAP":
+            well_item = wells_group.child(i)
+            break
+    assert well_item is not None
+    win.tree.itemDoubleClicked.emit(well_item, 0)
+    qtbot.wait(50)
+
+    assert win.section_viewer.current_axis == "inline"
+    assert win.section_viewer.current_index == target_inline
+    assert "SNAP" in win.map_view._well_marker_items

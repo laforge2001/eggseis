@@ -12,8 +12,13 @@ since the lib's `ConnectionCycleFailure` leaves dangling state.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import qtpynodeeditor as qne
 from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QGraphicsLineItem
 from qtpynodeeditor import (
     DataModelRegistry,
     FlowScene,
@@ -71,6 +76,18 @@ class _SourceModel(NodeDataModel):
         return
 
 
+class _HorizonModel(NodeDataModel):
+    """Visual model for a horizon node — no ports, name caption only."""
+
+    name = "Horizon"
+    caption = "Horizon"
+    caption_visible = True
+    num_ports = {PortType.input: 0, PortType.output: 0}
+    data_type = {"input": {}, "output": {}}
+    port_caption_visible = False
+    port_caption = {"input": {}, "output": {}}
+
+
 def _make_plugin_model_class(spec: PluginSpec) -> type[NodeDataModel]:
     """Build a NodeDataModel subclass for the given plugin spec.
 
@@ -115,6 +132,7 @@ class GraphCanvas(QWidget):
     edgeChanged = Signal()                # any structural connect/disconnect
     tapPortChanged = Signal(str, str)     # node_id, port
     selectionChanged = Signal(str)        # node_id selected (or "")
+    overlayChanged = Signal(str)          # horizon node_id whose pin state flipped
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -124,6 +142,9 @@ class GraphCanvas(QWidget):
         self._view = qne.FlowView(self._scene)
         self._scene_nodes: dict[str, qne.Node] = {}  # graph node_id -> scene node
         self._source_scene_node: qne.Node | None = None
+        self._horizon_scene_nodes: dict[str, qne.Node] = {}
+        self._dashed_lines: dict[str, QGraphicsLineItem] = {}
+        self._horizon_names_available: list[str] = []
         # Maps spec.id -> (model_class, spec). Generated NodeDataModel
         # subclasses are reverse-keyed by class name to translate
         # lib-side node_created back into our model.
@@ -135,11 +156,21 @@ class GraphCanvas(QWidget):
         layout.addWidget(self._view)
 
         self._registry.register_model(_SourceModel, category="eggseis")
+        # Register _HorizonModel so scene.create_node(_HorizonModel) works (the
+        # lib's create() requires a registered creator), then drop it from the
+        # category-association map so it does NOT appear in the lib's
+        # right-click "Add Node" menu. Surfacing it there spawns a horizon
+        # node with no associated horizon name, which is unusable.
+        self._registry.register_model(_HorizonModel, category="eggseis")
+        self._registry.registered_models_category_association().pop(
+            _HorizonModel.name, None
+        )
         self._scene.connection_created.connect(self._on_lib_connection_created)
         self._scene.connection_deleted.connect(self._on_lib_connection_deleted)
         self._scene.selectionChanged.connect(self._on_scene_selection_changed)
         self._scene.node_created.connect(self._on_lib_node_created)
         self._scene.node_deleted.connect(self._on_lib_node_deleted)
+        self._scene.node_moved.connect(lambda *_: self._refresh_dashed_lines())
         # Note: double-click is intentionally NOT consumed here. MainWindow
         # routes node_double_clicked to a parameters popup; tap-on-output
         # lives on the right-click context menu instead.
@@ -160,6 +191,14 @@ class GraphCanvas(QWidget):
         """
         for spec in specs:
             self._ensure_spec_registered(spec)
+
+    def register_horizons(self, names: list[str]) -> None:
+        """Set the list of horizon names available in the right-click menu.
+        MainWindow calls this whenever Project.horizons changes."""
+        self._horizon_names_available = list(names)
+
+    def horizon_names_available(self) -> list[str]:
+        return list(self._horizon_names_available)
 
     def _ensure_spec_registered(self, spec: PluginSpec) -> type[NodeDataModel]:
         entry = self._registered.get(spec.id)
@@ -189,6 +228,104 @@ class GraphCanvas(QWidget):
         self._spawn_scene_node(node)
         self.nodeAdded.emit(node.node_id)
         return node.node_id
+
+    def add_horizon_node(
+        self, horizon_name: str, *, pos: tuple[float, float] | None = None
+    ) -> str:
+        if self._graph is None:
+            raise RuntimeError("canvas not bound to a graph")
+        target_pos = pos if pos is not None else self._next_default_position()
+        nid = self._graph.add_horizon_node(horizon_name, pos=target_pos)
+        self._suppress_signal_sync = True
+        try:
+            scene_node = self._scene.create_node(_HorizonModel)
+        finally:
+            self._suppress_signal_sync = False
+        scene_node.model.caption = horizon_name
+        scene_node.position = target_pos
+        self._horizon_scene_nodes[nid] = scene_node
+        self._add_dashed_line(nid)
+        self.nodeAdded.emit(nid)
+        return nid
+
+    def set_horizon_pinned(self, node_id: str, pinned: bool) -> None:
+        if self._graph is None:
+            return
+        if pinned:
+            self._graph.pin_overlay(node_id)
+        else:
+            self._graph.unpin_overlay(node_id)
+        self.overlayChanged.emit(node_id)
+
+    def horizon_scene_node_for(self, node_id: str):
+        return self._horizon_scene_nodes.get(node_id)
+
+    def dashed_line_for(self, node_id: str):
+        return self._dashed_lines.get(node_id)
+
+    def disconnect_horizon(self, node_id: str) -> None:
+        """Drop the dashed line + association for the given horizon node."""
+        if self._graph is None:
+            return
+        self._graph.disconnect_horizon(node_id)
+        line_item = self._dashed_lines.pop(node_id, None)
+        if line_item is not None:
+            self._scene.removeItem(line_item)
+        self.edgeChanged.emit()
+
+    def connect_horizon(self, node_id: str) -> None:
+        """Re-create the dashed line + association to Source."""
+        if self._graph is None:
+            return
+        self._graph.connect_horizon(node_id)
+        if node_id not in self._dashed_lines:
+            self._add_dashed_line(node_id)
+        self.edgeChanged.emit()
+
+    def is_horizon_connected(self, node_id: str) -> bool:
+        if self._graph is None:
+            return False
+        return any(
+            a.horizon_node_id == node_id for a in self._graph.associations
+        )
+
+    def _add_dashed_line(self, horizon_node_id: str) -> None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QColor, QPen
+        from PySide6.QtWidgets import QGraphicsLineItem
+
+        if self._source_scene_node is None:
+            return
+        horizon_scene = self._horizon_scene_nodes.get(horizon_node_id)
+        if horizon_scene is None:
+            return
+        pen = QPen(QColor(255, 204, 0))
+        pen.setStyle(Qt.PenStyle.DashLine)
+        pen.setWidthF(1.5)
+        line_item = QGraphicsLineItem()
+        line_item.setPen(pen)
+        line_item.setOpacity(0.6)
+        line_item.setZValue(-1)
+        self._scene.addItem(line_item)
+        self._dashed_lines[horizon_node_id] = line_item
+        self._update_dashed_line(horizon_node_id)
+
+    def _update_dashed_line(self, horizon_node_id: str) -> None:
+        from PySide6.QtCore import QLineF
+
+        horizon_scene = self._horizon_scene_nodes.get(horizon_node_id)
+        if horizon_scene is None or self._source_scene_node is None:
+            return
+        line_item = self._dashed_lines.get(horizon_node_id)
+        if line_item is None:
+            return
+        h_center = horizon_scene.graphics_object.sceneBoundingRect().center()
+        s_center = self._source_scene_node.graphics_object.sceneBoundingRect().center()
+        line_item.setLine(QLineF(h_center, s_center))
+
+    def _refresh_dashed_lines(self) -> None:
+        for nid in list(self._dashed_lines.keys()):
+            self._update_dashed_line(nid)
 
     def _next_default_position(self) -> tuple[float, float]:
         """Pick a position inside the current viewport, cascading rightward.
@@ -221,10 +358,27 @@ class GraphCanvas(QWidget):
     def remove_node(self, node_id: str) -> None:
         if self._graph is None:
             return
+        is_horizon = (
+            node_id in self._horizon_scene_nodes
+            or (node_id in self._graph.nodes
+                and self._graph.nodes[node_id].kind == "horizon")
+        )
         self._graph.remove_node(node_id)
-        scene_node = self._scene_nodes.pop(node_id, None)
-        if scene_node is not None:
-            self._scene.remove_node(scene_node)
+        if is_horizon:
+            scene_node = self._horizon_scene_nodes.pop(node_id, None)
+            if scene_node is not None:
+                self._suppress_signal_sync = True
+                try:
+                    self._scene.remove_node(scene_node)
+                finally:
+                    self._suppress_signal_sync = False
+            line_item = self._dashed_lines.pop(node_id, None)
+            if line_item is not None:
+                self._scene.removeItem(line_item)
+        else:
+            scene_node = self._scene_nodes.pop(node_id, None)
+            if scene_node is not None:
+                self._scene.remove_node(scene_node)
         self.nodeRemoved.emit(node_id)
         self.edgeChanged.emit()
 
@@ -282,6 +436,8 @@ class GraphCanvas(QWidget):
             # model, which still holds the canonical state we're rendering.
             self._scene.clear_scene()
             self._scene_nodes.clear()
+            self._horizon_scene_nodes.clear()
+            self._dashed_lines.clear()
             self._source_scene_node = None
 
             # Re-spawn Source. Source stays movable + wireable + selectable;
@@ -295,13 +451,33 @@ class GraphCanvas(QWidget):
         if self._graph is None:
             return
 
-        # Spawn nodes.
+        # Spawn nodes — branch on kind so horizon nodes get their scene model
+        # (no ports) + dashed line back to Source instead of the plugin path.
         for node in self._graph.nodes.values():
-            self._spawn_scene_node(node)
+            if node.kind == "horizon":
+                self._spawn_horizon_scene_node(node)
+            else:
+                self._spawn_scene_node(node)
 
         # Spawn edges.
         for edge in self._graph.edges:
             self._spawn_scene_edge(edge)
+
+    def _spawn_horizon_scene_node(self, node: Node) -> None:
+        """Render a horizon node + dashed line. Used both by add_horizon_node
+        (live add) and by _rerender (graph reloaded from project.yaml)."""
+        self._suppress_signal_sync = True
+        try:
+            scene_node = self._scene.create_node(_HorizonModel)
+        finally:
+            self._suppress_signal_sync = False
+        scene_node.model.caption = node.horizon_name or "Horizon"
+        if node.pos != (0.0, 0.0):
+            scene_node.position = node.pos
+        self._horizon_scene_nodes[node.node_id] = scene_node
+        # Only draw the dashed line if the horizon is associated with a Source.
+        if any(a.horizon_node_id == node.node_id for a in self._graph.associations):
+            self._add_dashed_line(node.node_id)
 
     def _spawn_scene_node(self, node: Node) -> None:
         model_cls = self._ensure_spec_registered(node.spec)
@@ -381,10 +557,18 @@ class GraphCanvas(QWidget):
     # --- lib-signal sync (user-drag on canvas) -------------------------
 
     def _scene_node_to_graph_id(self, scene_node) -> str | None:
-        """Reverse-lookup: scene node -> graph node_id (or SOURCE_ID)."""
+        """Reverse-lookup: scene node -> graph node_id (or SOURCE_ID).
+
+        Walks both `_scene_nodes` (plugin nodes) and `_horizon_scene_nodes`
+        so horizon-node right-click context menus and other reverse-lookup
+        consumers can resolve a horizon scene-node to its graph id.
+        """
         if scene_node is self._source_scene_node:
             return SOURCE_ID
         for node_id, sn in self._scene_nodes.items():
+            if sn is scene_node:
+                return node_id
+        for node_id, sn in self._horizon_scene_nodes.items():
             if sn is scene_node:
                 return node_id
         return None
@@ -481,13 +665,29 @@ class GraphCanvas(QWidget):
         if self._suppress_signal_sync or self._graph is None:
             return
         if scene_node is self._source_scene_node:
-            return  # Should not happen (Source is locked) — defensive.
-        node_id = self._scene_node_to_graph_id(scene_node)
+            return  # Source is locked against deletion.
+        # Reverse-lookup against both maps; whichever holds the scene_node
+        # is the one we need to clean up.
+        horizon_id = next(
+            (nid for nid, sn in self._horizon_scene_nodes.items() if sn is scene_node),
+            None,
+        )
+        plugin_id = next(
+            (nid for nid, sn in self._scene_nodes.items() if sn is scene_node),
+            None,
+        )
+        node_id = horizon_id or plugin_id
         if node_id is None or node_id == SOURCE_ID:
             return
         if node_id in self._graph.nodes:
             self._graph.remove_node(node_id)
-        self._scene_nodes.pop(node_id, None)
+        if horizon_id is not None:
+            self._horizon_scene_nodes.pop(horizon_id, None)
+            line_item = self._dashed_lines.pop(horizon_id, None)
+            if line_item is not None:
+                self._scene.removeItem(line_item)
+        else:
+            self._scene_nodes.pop(node_id, None)
         self.nodeRemoved.emit(node_id)
         self.edgeChanged.emit()
 

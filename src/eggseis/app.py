@@ -32,7 +32,9 @@ from eggseis.plugin import PluginSpec
 from eggseis.plugin_loader import discover_all, load_errors
 from eggseis.plugin_template import create_template, open_in_editor
 from eggseis.project import Project
+from eggseis.viewers.map_view import MapViewWidget
 from eggseis.viewers.section import DEFAULT_LUT, SectionViewer
+from eggseis.viewers.well_log_panel import WellLogPanel
 from eggseis.widgets.param_dock import ParamDock
 from eggseis.widgets.project_tree import ProjectTreeWidget
 from eggseis.widgets.slice_nav import SliceNavigator
@@ -49,25 +51,33 @@ class MainWindow(QMainWindow):
         self.tree = ProjectTreeWidget()
         self.section_viewer = SectionViewer()
         self.slice_nav = SliceNavigator()
+        self.map_view = MapViewWidget()
         self.param_dock = ParamDock()  # Legacy single-attribute param editor.
 
         # Three-pane layout:
-        #   tree (far left) | section viewer + slice nav (center) | graph canvas (right)
+        #   tree (far left) | section viewer + slice nav + map view (center) | graph canvas (right)
         viewer_pane = QSplitter(Qt.Vertical)
         viewer_pane.addWidget(self.section_viewer)
         viewer_pane.addWidget(self.slice_nav)
-        viewer_pane.setStretchFactor(0, 1)
+        viewer_pane.addWidget(self.map_view)
+        viewer_pane.setStretchFactor(0, 3)  # section gets most height
+        viewer_pane.setStretchFactor(1, 0)  # nav fixed
+        viewer_pane.setStretchFactor(2, 1)  # map gets ~25%
 
         self._canvas = GraphCanvas()
+
+        self.well_log_panel = WellLogPanel()
 
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self.tree)
         splitter.addWidget(viewer_pane)
         splitter.addWidget(self._canvas)
+        splitter.addWidget(self.well_log_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 1)
-        splitter.setSizes([220, 600, 380])
+        splitter.setStretchFactor(3, 0)
+        splitter.setSizes([220, 600, 380, 0])  # well lane hidden initially
         self.setCentralWidget(splitter)
 
         # Legacy Attribute-menu param dock kept around for the menu-driven
@@ -98,13 +108,22 @@ class MainWindow(QMainWindow):
 
         self._graphs: dict[str, Graph] = {}
         self._active_survey_id: str | None = None
+        self._active_survey_name: str | None = None  # SurveyEntry.name from project.yaml
         self._canvas.edgeChanged.connect(self._request_tap)
         self._canvas.tapPortChanged.connect(lambda _id, _port: self._request_tap())
         # Pre-register every discovered plugin so qtpynodeeditor's
         # right-click "Add Node" menu shows the full library.
         self._canvas.register_specs(discover_all())
-        # Auto-tap any newly added node (covers menu adds and right-click).
-        self._canvas.nodeAdded.connect(lambda nid: self._canvas.set_tap(nid, "out"))
+        # Auto-tap any newly added plugin node (covers menu adds and
+        # right-click). Horizon nodes have no output port and are not
+        # tappable — skip them.
+        self._canvas.nodeAdded.connect(self._on_canvas_node_added)
+
+        # Horizon overlay sync: pin/unpin (overlayChanged), add (nodeAdded),
+        # remove (nodeRemoved) all feed _sync_horizon_overlays.
+        self._canvas.overlayChanged.connect(lambda _nid: self._sync_horizon_overlays())
+        self._canvas.nodeAdded.connect(lambda _nid: self._sync_horizon_overlays())
+        self._canvas.nodeRemoved.connect(lambda _nid: self._sync_horizon_overlays())
 
         # Double-click → modeless params popup. Replaces the previous tap-on-
         # double-click behaviour; tap stays on the right-click context menu.
@@ -128,6 +147,17 @@ class MainWindow(QMainWindow):
         m_file.addAction(a_open)
         m_file.addAction(a_new_plugin)
         m_file.addSeparator()
+        a_import_horizon = QAction("&Import Horizon (XYZ CSV)…", self)
+        a_import_horizon.triggered.connect(self._on_import_horizon)
+        a_import_well = QAction("Import &Well (LAS)…", self)
+        a_import_well.triggered.connect(self._on_import_well)
+        m_file.addAction(a_import_horizon)
+        m_file.addAction(a_import_well)
+        m_file.addSeparator()
+        a_save_project = QAction("&Save Project", self)
+        a_save_project.triggered.connect(self._on_save_project)
+        m_file.addAction(a_save_project)
+        m_file.addSeparator()
         m_file.addAction(a_quit)
 
         m_view = self.menuBar().addMenu("&View")
@@ -146,10 +176,18 @@ class MainWindow(QMainWindow):
         self._lock_levels_action.toggled.connect(self.section_viewer.set_levels_locked)
         m_view.addAction(self._lock_levels_action)
 
+        m_survey = self.menuBar().addMenu("&Survey")
+        a_edit_headers = QAction("&Edit Trace Headers…", self)
+        a_edit_headers.triggered.connect(self._on_edit_trace_headers)
+        m_survey.addAction(a_edit_headers)
+
         m_graph = self.menuBar().addMenu("&Graph")
         a_add_node = QAction("&Add Plugin to Graph…", self)
         a_add_node.triggered.connect(self._on_add_node_to_graph)
         m_graph.addAction(a_add_node)
+        a_add_horizon = QAction("Add &Horizon to Graph…", self)
+        a_add_horizon.triggered.connect(self._on_add_horizon_to_graph)
+        m_graph.addAction(a_add_horizon)
         m_graph.addSeparator()
         a_export = QAction("&Export Volume with Graph Applied…", self)
         a_export.triggered.connect(self._on_export_volume)
@@ -212,9 +250,71 @@ class MainWindow(QMainWindow):
 
     def _wire_signals(self) -> None:
         self.tree.surveyActivated.connect(self.open_survey)
+        self.tree.horizonActivated.connect(self._on_horizon_activated)
+        self.tree.wellActivated.connect(self._on_well_activated)
+        self.tree.loadRequested.connect(self._on_tree_load_requested)
         self.slice_nav.sliceChanged.connect(self._on_slice_changed)
         self.section_viewer.cursorMoved.connect(self.statusBar().showMessage)
         self.param_dock.paramsChanged.connect(self._on_params_changed)
+        self.map_view.sliceRequested.connect(
+            lambda axis, idx: self.slice_nav.set_axis_and_index(axis, idx)
+        )
+
+    def _on_horizon_activated(self, name: str) -> None:
+        if self._active_survey_id is None:
+            QMessageBox.information(
+                self, "Load Horizon",
+                "Open a survey first, then double-click a horizon to add it."
+            )
+            return
+        if self._project is None:
+            return
+        graph = self._graphs.get(self._active_survey_id)
+        if graph is None:
+            return
+        for node in graph.nodes.values():
+            if node.kind == "horizon" and node.horizon_name == name:
+                return  # already on canvas
+        # add_horizon_node auto-pins via Graph.add_horizon_node and the
+        # nodeAdded signal triggers _sync_horizon_overlays.
+        self._canvas.add_horizon_node(name)
+
+    def _on_well_activated(self, name: str) -> None:
+        if self._active_survey_id is None:
+            QMessageBox.information(
+                self, "Load Well",
+                "Open a survey first, then double-click a well to load it."
+            )
+            return
+        if self._project is None:
+            return
+        try:
+            well = self._project.load_well(name)
+        except KeyError as exc:
+            QMessageBox.warning(self, "Load Well", str(exc))
+            return
+        self.section_viewer.add_well_overlay(well)
+        sample_rate = (
+            self.section_viewer.geometry.sample_rate_ms
+            if self.section_viewer.geometry else 1.0
+        )
+        self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+        self._snap_section_to_well(well)
+        # Reveal the log lane.
+        self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
+        self.statusBar().showMessage(f"Loaded well {name}", 3000)
+
+    def _on_tree_load_requested(self, category: str) -> None:
+        if category == "horizon":
+            self._on_import_horizon()
+        elif category == "well":
+            self._on_import_well()
+        elif category == "survey":
+            QMessageBox.information(
+                self, "Load Survey",
+                "Survey import via the project tree is not yet available. "
+                "Add survey paths to the project's project.yaml manually."
+            )
 
     @property
     def project(self) -> Project | None:
@@ -228,6 +328,54 @@ class MainWindow(QMainWindow):
             self.open_project(Path(d))
         except (FileNotFoundError, ValueError) as exc:
             QMessageBox.critical(self, "Open Project failed", str(exc))
+
+    def _on_edit_trace_headers(self) -> None:
+        from eggseis.widgets.header_editor import HeaderEditorDialog
+
+        if self.section_viewer.geometry is None:
+            QMessageBox.information(
+                self, "Edit Trace Headers",
+                "Open a survey first."
+            )
+            return
+        dialog = HeaderEditorDialog(self.section_viewer.geometry, self)
+        dialog.geometryOverridden.connect(self._apply_geometry_override)
+        dialog.geometryReset.connect(self._reset_geometry_override)
+        dialog.show()
+
+    def _apply_geometry_override(self, new_geom) -> None:
+        # Replace the volume's geometry view by re-binding the slice nav and
+        # section viewer with the override. Note: the volume's read_inline/etc
+        # still index into the original mdio store; this just changes how the
+        # UI labels + addresses sections.
+        if not self.section_viewer.has_volume:
+            return
+        volume = self.section_viewer._volume
+        backend = volume._backend
+        # In-memory override: replace the SurveyGeometry on the underlying
+        # backend. For v1.0 we do this defensively via attribute write.
+        try:
+            object.__setattr__(backend, "_geometry", new_geom)
+        except (AttributeError, TypeError):
+            QMessageBox.warning(
+                self, "Override failed",
+                "This backend does not support in-memory geometry overrides."
+            )
+            return
+        # Re-bind UI consumers.
+        self.slice_nav.set_geometry(new_geom)
+        if hasattr(self, "map_view"):
+            self.map_view.set_volume(volume)
+        self.statusBar().showMessage("Geometry override applied.", 3000)
+
+    def _reset_geometry_override(self) -> None:
+        # Easier path: re-open the survey from disk.
+        if self._active_survey_id is None:
+            return
+        self.open_survey(
+            Path(self._active_survey_id),
+            survey_name=self._active_survey_name,
+        )
 
     def _show_errors_dialog(
         self, title: str, summary: str, empty_message: str, body_lines: list[str]
@@ -287,7 +435,67 @@ class MainWindow(QMainWindow):
         self.tree.set_project(self._project)
         self.setWindowTitle(f"eggseis — {self._project.name}")
 
-    def open_survey(self, survey_path: Path) -> None:
+        # Auto-restore the previously-active survey if the saved graph
+        # tagged one. Status-bar hint so users know what happened.
+        active_name = None
+        if self._project.graph and isinstance(self._project.graph, dict):
+            active_name = self._project.graph.get("active_survey")
+        if active_name:
+            entry = next(
+                (s for s in self._project.surveys if s.name == active_name), None,
+            )
+            if entry is not None:
+                self.statusBar().showMessage(
+                    f"Restoring session state for {entry.name}…", 5000
+                )
+                self.open_survey(entry.path, survey_name=entry.name)
+                # After open_survey runs, apply viewer state and reload wells.
+                self._restore_viewer_state()
+                self._restore_open_wells()
+
+    def _restore_viewer_state(self) -> None:
+        if self._project is None or self._project.viewer is None:
+            return
+        v = self._project.viewer
+        try:
+            axis = v.get("axis", "inline")
+            index = int(v.get("index", 0))
+            self.section_viewer.show_slice(axis, index)
+            self.slice_nav.set_axis_and_index(axis, index)
+        except Exception:
+            pass
+        try:
+            cmap = v.get("colormap")
+            if cmap:
+                self.section_viewer.set_colormap(cmap)
+        except Exception:
+            pass
+        try:
+            lock = v.get("levels_locked")
+            if lock is not None:
+                self.section_viewer.set_levels_locked(bool(lock))
+        except Exception:
+            pass
+
+    def _restore_open_wells(self) -> None:
+        if self._project is None or not self._project.open_wells:
+            return
+        for name in self._project.open_wells:
+            try:
+                well = self._project.load_well(name)
+            except KeyError:
+                continue
+            self.section_viewer.add_well_overlay(well)
+            sample_rate = (
+                self.section_viewer.geometry.sample_rate_ms
+                if self.section_viewer.geometry else 1.0
+            )
+            self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+            self._snap_section_to_well(well)
+        if self._project.open_wells:
+            self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
+
+    def open_survey(self, survey_path: Path, *, survey_name: str | None = None) -> None:
         if getattr(self, "_opening_survey", False):
             return  # Defensive: ignore re-entry from rapid double-clicks.
         self._opening_survey = True
@@ -298,10 +506,54 @@ class MainWindow(QMainWindow):
                 volume = SeismicVolume(MDIOBackend(survey_path), name=survey_path.stem)
                 survey_id = str(survey_path.resolve())
                 self._active_survey_id = survey_id
+                self._active_survey_name = survey_name or survey_path.stem
                 self._graphs.setdefault(survey_id, Graph())
+                # If project.yaml saved a graph for this survey, try to reconstruct it.
+                if (
+                    self._project is not None
+                    and self._project.graph is not None
+                    and self._project.graph.get("active_survey")
+                    == self._active_survey_name
+                ):
+                    from eggseis.graph.model import (
+                        OrphanHorizonError,
+                        OrphanPluginError,
+                    )
+                    from eggseis.plugin import registered
+
+                    graph_dict = self._project.graph["graph"]
+                    plugins = {spec.id: spec for spec in registered()}
+                    horizons = {h.name: h for h in self._project.horizons}
+                    try:
+                        self._graphs[survey_id] = Graph.from_dict(
+                            graph_dict, plugins=plugins, horizons=horizons,
+                        )
+                    except OrphanPluginError as exc:
+                        action = self._prompt_orphan_recovery(
+                            "Missing plugin",
+                            str(exc),
+                            "This project references a plugin that's not installed.",
+                        )
+                        if action == "abort":
+                            raise
+                        # else: skip → keep the empty graph already in self._graphs[survey_id]
+                    except OrphanHorizonError as exc:
+                        action = self._prompt_orphan_recovery(
+                            "Missing horizon",
+                            str(exc),
+                            "This project references a horizon that's not in "
+                            "the project's horizons folder.",
+                        )
+                        if action == "abort":
+                            raise
                 self.section_viewer.set_volume(volume)
                 self.slice_nav.set_geometry(volume.geometry)
+                self.map_view.set_volume(volume)
                 self._canvas.bind(self._graphs[survey_id])
+                if self._project is not None:
+                    self._canvas.register_horizons(
+                        [h.name for h in self._project.horizons]
+                    )
                 self._close_all_popups()
                 if self._graphs[survey_id].nodes:
                     self._request_tap()
@@ -313,6 +565,32 @@ class MainWindow(QMainWindow):
         for popup in list(self._params_popups.values()):
             popup.close()
         self._params_popups.clear()
+
+    def _prompt_orphan_recovery(
+        self, title: str, missing: str, message: str
+    ) -> str:
+        """Show a dialog with Skip / Abort. Returns "skip" or "abort".
+
+        Install path is documented but not implemented in v1.0 — surface
+        a text-only hint pointing the user at File → New Plugin and
+        $EGGSEIS_PLUGIN_PATH.
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle(title)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(f"{message}\n\nMissing: {missing}")
+        box.setInformativeText(
+            "Skip: load the project without this item.\n"
+            "Abort: cancel project load.\n\n"
+            "To install a missing plugin, drop the .py file under "
+            "~/.eggseis/plugins/ or set $EGGSEIS_PLUGIN_PATH."
+        )
+        box.addButton("Skip", QMessageBox.ButtonRole.AcceptRole)
+        abort_btn = box.addButton("Abort", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() is abort_btn:
+            return "abort"
+        return "skip"
 
     @contextmanager
     def _busy_progress(self, title: str, message: str):
@@ -350,6 +628,7 @@ class MainWindow(QMainWindow):
         # active, recompute. The graph-driven path takes precedence over
         # the menu-driven single-attribute path so we don't paint twice.
         self.section_viewer.show_slice(axis, index)
+        self.map_view.show_slice(axis, index)
         graph = (
             self._graphs.get(self._active_survey_id)
             if self._active_survey_id else None
@@ -410,6 +689,159 @@ class MainWindow(QMainWindow):
             return None
         return self._canvas.add_plugin(spec)
 
+    def _on_import_horizon(self) -> None:
+        from eggseis.data.horizon import import_xyz_csv, import_xyz_csv_autodetect
+
+        if self._project is None:
+            QMessageBox.information(
+                self, "Import Horizon",
+                "Open a project first."
+            )
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Horizon (XYZ CSV)", "", "CSV (*.csv);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            if self._active_survey_id is not None:
+                geom = self.section_viewer.geometry
+                horizon = import_xyz_csv(
+                    Path(path),
+                    name=Path(path).stem,
+                    inline_min=geom.inline_min, n_inlines=geom.n_inlines,
+                    inline_step=geom.inline_step,
+                    xline_min=geom.xline_min, n_xlines=geom.n_xlines,
+                    xline_step=geom.xline_step,
+                    geometry_ref=str(self._active_survey_id),
+                )
+            else:
+                horizon = import_xyz_csv_autodetect(
+                    Path(path),
+                    name=Path(path).stem,
+                    geometry_ref="(detached)",
+                )
+        except Exception as exc:
+            QMessageBox.critical(self, "Import failed", str(exc))
+            return
+
+        # Persist to disk + register in project + refresh tree.
+        from eggseis.project import HorizonEntry
+        target_dir = self._project.root / "horizons" / horizon.name
+        try:
+            horizon.save(target_dir)
+        except Exception as exc:
+            QMessageBox.warning(self, "Horizon save failed", str(exc))
+            return
+        entry = HorizonEntry(name=horizon.name, path=target_dir, color=horizon.color)
+        self._project = self._project.with_horizon_added(entry)
+        self.tree.set_project(self._project)
+        self._canvas.register_horizons([h.name for h in self._project.horizons])
+
+        # If a survey is active, also drop the overlay onto the section viewer.
+        if self._active_survey_id is not None:
+            self.section_viewer.add_horizon_overlay(horizon)
+        self.statusBar().showMessage(f"Imported horizon {horizon.name}", 3000)
+
+    def _splitter_sizes_with_log_lane(self) -> list[int]:
+        """Sizes for the central splitter when the well log lane is visible."""
+        return [220, 500, 320, 200]
+
+    def _snap_section_to_well(self, well) -> None:
+        """Jump the section viewer to the well's inline and drop a map marker.
+
+        Called whenever a well becomes visible (import, tree double-click, or
+        project restore) so the overlay is immediately on-screen instead of
+        hidden on some unrelated inline.
+        """
+        geom = self.section_viewer.geometry
+        if geom is None:
+            return
+        target_inline = round(well.surface_xy[1])
+        if not (geom.inline_min <= target_inline <= geom.inline_max):
+            return
+        self.slice_nav.set_axis_and_index("inline", target_inline)
+        self.map_view.add_well_marker(well.name, well.surface_xy)
+
+    def _on_import_well(self) -> None:
+        from eggseis.data.well import import_las
+
+        if self._active_survey_id is None:
+            QMessageBox.information(
+                self, "Import Well",
+                "Open a survey first (double-click one in the project tree), "
+                "then re-run this action."
+            )
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import Well (LAS)", "", "LAS (*.las);;All files (*)"
+        )
+        if not path:
+            return
+        geom = self.section_viewer.geometry
+        center = (
+            (geom.xline_min + geom.n_xlines // 2),
+            (geom.inline_min + geom.n_inlines // 2),
+        )
+        try:
+            well = import_las(Path(path), name=Path(path).stem, surface_xy=center)
+        except Exception as exc:
+            QMessageBox.critical(self, "Import failed", str(exc))
+            return
+        self.section_viewer.add_well_overlay(well)
+        sample_rate = (
+            self.section_viewer.geometry.sample_rate_ms
+            if self.section_viewer.geometry is not None
+            else 1.0
+        )
+        self.well_log_panel.set_well(well, sample_rate_ms=sample_rate)
+        self._snap_section_to_well(well)
+        # Make the well log lane visible.
+        self.centralWidget().setSizes(self._splitter_sizes_with_log_lane())
+        if self._project is not None:
+            from eggseis.project import WellEntry
+            target = self._project.root / "wells" / f"{well.name}.h5"
+            try:
+                well.save(target)
+            except Exception as exc:
+                QMessageBox.warning(self, "Well save failed", str(exc))
+            else:
+                entry = WellEntry(name=well.name, path=target)
+                self._project = self._project.with_well_added(entry)
+                self.tree.set_project(self._project)
+        self.statusBar().showMessage(f"Imported well {well.name}", 3000)
+
+    def _on_save_project(self) -> None:
+        if self._project is None:
+            self.statusBar().showMessage("No project loaded.", 3000)
+            return
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        graph_dict = graph.to_dict() if graph is not None else None
+        viewer_state = {
+            "axis": self.section_viewer.current_axis,
+            "index": self.section_viewer.current_index,
+            "colormap": self.section_viewer.lut_name,
+            "levels_locked": self.section_viewer.levels_locked,
+        }
+        proj = self._project
+        if graph_dict is not None and self._active_survey_name is not None:
+            proj = proj.with_graph(
+                graph_dict=graph_dict,
+                active_survey=self._active_survey_name,
+            )
+        proj = proj.with_viewer(viewer_state)
+        loaded_well_names = tuple(self.section_viewer._well_overlays.keys())
+        proj = proj.with_open_wells(loaded_well_names)
+        try:
+            proj.save()
+            self._project = proj
+            self.statusBar().showMessage("Project saved.", 3000)
+        except Exception as exc:
+            QMessageBox.critical(self, "Save failed", str(exc))
+
     def _on_node_double_clicked_open_params(self, scene_node) -> None:
         node_id = self._canvas._scene_node_to_graph_id(scene_node)
         if node_id is None or node_id == SOURCE_ID:
@@ -440,6 +872,11 @@ class MainWindow(QMainWindow):
             return
         graph = self._graphs[self._active_survey_id]
         node = graph.nodes[node_id]
+
+        if node.kind == "horizon":
+            self._build_horizon_context_menu(node_id, screen_pos)
+            return
+
         is_multi_input = len(node.spec.inputs) > 1
 
         menu = QMenu(self)
@@ -466,6 +903,39 @@ class MainWindow(QMainWindow):
             lambda _checked, nid=node_id: self._canvas.remove_node(nid)
         )
         menu.addAction(action_remove)
+        menu.exec_(screen_pos)
+
+    def _build_horizon_context_menu(self, node_id: str, screen_pos) -> None:
+        graph = self._graphs[self._active_survey_id]
+        is_pinned = node_id in graph.pinned_overlays
+        menu = QMenu(self)
+        toggle = QAction("Unpin overlay" if is_pinned else "Pin overlay", self)
+        toggle.triggered.connect(
+            lambda _checked, nid=node_id, on=not is_pinned:
+                self._canvas.set_horizon_pinned(nid, on)
+        )
+        menu.addAction(toggle)
+        menu.addSeparator()
+        is_connected = self._canvas.is_horizon_connected(node_id)
+        toggle_conn = QAction(
+            "Disconnect from Source" if is_connected else "Connect to Source",
+            self,
+        )
+        if is_connected:
+            toggle_conn.triggered.connect(
+                lambda _checked, nid=node_id: self._canvas.disconnect_horizon(nid)
+            )
+        else:
+            toggle_conn.triggered.connect(
+                lambda _checked, nid=node_id: self._canvas.connect_horizon(nid)
+            )
+        menu.addAction(toggle_conn)
+        menu.addSeparator()
+        remove = QAction("Remove", self)
+        remove.triggered.connect(
+            lambda _checked, nid=node_id: self._canvas.remove_node(nid)
+        )
+        menu.addAction(remove)
         menu.exec_(screen_pos)
 
     def _on_export_volume(self) -> None:
@@ -525,6 +995,28 @@ class MainWindow(QMainWindow):
         spec = next(s for s in specs if s.name == choice)
         self.add_plugin_to_graph(spec)
 
+    def _on_add_horizon_to_graph(self) -> None:
+        if self._active_survey_id is None:
+            QMessageBox.information(
+                self, "Add Horizon",
+                "Open a survey first, then re-run this action."
+            )
+            return
+        names = self._canvas.horizon_names_available()
+        if not names:
+            QMessageBox.information(
+                self, "Add Horizon",
+                "No horizons in this project. Import one first via "
+                "File → Import Horizon."
+            )
+            return
+        choice, ok = QInputDialog.getItem(
+            self, "Add Horizon to Graph", "Horizon:", names, 0, False
+        )
+        if not ok:
+            return
+        self._canvas.add_horizon_node(choice)
+
     def _on_node_params_changed(self, node_id: str, params) -> None:
         graph = (
             self._graphs.get(self._active_survey_id)
@@ -534,6 +1026,18 @@ class MainWindow(QMainWindow):
             return
         graph.set_params(node_id, params)
         self._request_tap()
+
+    def _on_canvas_node_added(self, node_id: str) -> None:
+        """Auto-tap newly added plugin nodes; horizon nodes are not tappable."""
+        graph = (
+            self._graphs.get(self._active_survey_id)
+            if self._active_survey_id else None
+        )
+        if graph is None or node_id not in graph.nodes:
+            return
+        if graph.nodes[node_id].kind == "horizon":
+            return
+        self._canvas.set_tap(node_id, "out")
 
     def _request_tap(self) -> None:
         volume = self.section_viewer.volume
@@ -545,6 +1049,7 @@ class MainWindow(QMainWindow):
             # show_slice. Skip the executor to avoid stamping a redundant
             # raw overlay.
             self.section_viewer.clear_overlay()
+            self._sync_horizon_overlays()
             return
         # Mid-wiring: the user has tapped a node whose inputs aren't all
         # connected yet. Stay on raw rather than firing a failed signal —
@@ -552,6 +1057,7 @@ class MainWindow(QMainWindow):
         tap_node, _ = graph.tap_port
         if not self._cone_fully_wired(graph, tap_node):
             self.section_viewer.clear_overlay()
+            self._sync_horizon_overlays()
             return
         self._executor.request_tap(
             graph,
@@ -559,6 +1065,55 @@ class MainWindow(QMainWindow):
             self.section_viewer.current_axis,
             self.section_viewer.current_index,
         )
+        self._sync_horizon_overlays()
+
+    def _sync_horizon_overlays(self) -> None:
+        if self._active_survey_id is None or self._project is None:
+            return
+        graph = self._graphs.get(self._active_survey_id)
+        if graph is None:
+            return
+        visible_ids = set(graph.visible_horizons_for_tap(*graph.tap_port))
+        # Map ids → horizon names via the graph's horizon nodes.
+        visible_names = {
+            graph.nodes[nid].horizon_name for nid in visible_ids
+            if nid in graph.nodes
+            and graph.nodes[nid].kind == "horizon"
+            and graph.nodes[nid].horizon_name is not None
+        }
+        current = set(self.section_viewer.horizon_overlay_names())
+
+        for name in current - visible_names:
+            self.section_viewer.remove_horizon_overlay(name)
+        for name in visible_names - current:
+            try:
+                horizon = self._project.load_horizon(name)
+            except KeyError:
+                continue
+            self.section_viewer.add_horizon_overlay(horizon)
+
+        # Surface "horizon not visible" reasons.
+        if not visible_names:
+            pinned_count = sum(
+                1 for nid in graph.pinned_overlays
+                if nid in graph.nodes and graph.nodes[nid].kind == "horizon"
+            )
+            if pinned_count > 0:
+                reason = self._horizon_invisible_reason(graph)
+                self.section_viewer.show_warning(
+                    f"{pinned_count} horizon(s) not visible: {reason}"
+                )
+            else:
+                self.section_viewer.clear_warning()
+        else:
+            self.section_viewer.clear_warning()
+
+    def _horizon_invisible_reason(self, graph) -> str:
+        if self._active_survey_id is None:
+            return "no survey loaded"
+        if self.section_viewer.current_axis == "timeslice":
+            return "timeslice axis (no polyline rendering yet)"
+        return "out of section range"
 
     def _cone_fully_wired(self, graph: Graph, tap_node: str) -> bool:
         from eggseis.graph.model import SOURCE_ID as _SRC
