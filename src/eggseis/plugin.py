@@ -11,10 +11,6 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 
-class PluginRegistrationError(Exception):
-    """Raised when a plugin decorator is misconfigured at decoration time."""
-
-
 @dataclass(frozen=True)
 class Param:
     """User-facing parameter declaration. Translated into a pydantic field."""
@@ -60,6 +56,7 @@ def _build_spec(
     vectorized: bool,
     deterministic: bool,
     kind: Literal["transform", "sink"] = "transform",
+    cmap: str | None = None,
 ) -> PluginSpec:
     sig = inspect.signature(func)
     fields: dict[str, tuple[type, Any]] = {}
@@ -115,6 +112,7 @@ def _build_spec(
         accepts_context=accepts_context,
         inputs=inputs,
         kind=kind,
+        cmap=cmap,
     )
 
 
@@ -124,6 +122,7 @@ def trace_attribute(
     version: str = "0.1.0",
     vectorized: bool = False,
     deterministic: bool = True,
+    cmap: str | None = None,
 ) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
     """Decorate a function as a trace-local seismic attribute.
 
@@ -131,7 +130,17 @@ def trace_attribute(
     argument with a `Param(...)` default becomes a pydantic field. The first
     positional argument (`trace` for scalar mode, `traces` for vectorized)
     and an optional `context` dict are treated specially.
+
+    ``cmap`` is an optional default colormap name. Validated eagerly against
+    ``eggseis.colormaps.LUTS_AVAILABLE``; an unknown value raises ``ValueError``.
     """
+    if cmap is not None:
+        from eggseis.colormaps import LUTS_AVAILABLE
+
+        if cmap not in LUTS_AVAILABLE:
+            raise ValueError(
+                f"@trace_attribute cmap={cmap!r} not in {LUTS_AVAILABLE}"
+            )
 
     def decorator(func: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
         input_port = "traces" if vectorized else "trace"
@@ -142,6 +151,7 @@ def trace_attribute(
             inputs=(input_port,),
             vectorized=vectorized,
             deterministic=deterministic,
+            cmap=cmap,
         )
         _REGISTRY[spec.id] = spec
         func._eggseis_spec = spec  # type: ignore[attr-defined]
@@ -157,6 +167,7 @@ def graph_node(
     inputs: tuple[str, ...] = ("input",),
     deterministic: bool = True,
     kind: Literal["transform", "sink"] = "transform",
+    cmap: str | None = None,
 ) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
     """Decorate a function as a graph-node plugin with N named input ports.
 
@@ -165,7 +176,17 @@ def graph_node(
     returns a single ndarray on output port `"out"`. Non-input args with a
     `Param(...)` default become pydantic fields. An optional `context` arg
     is treated as the per-call sidecar dict (same shape as `@trace_attribute`).
+
+    ``cmap`` is an optional default colormap name. Validated eagerly against
+    ``eggseis.colormaps.LUTS_AVAILABLE``; an unknown value raises ``ValueError``.
     """
+    if cmap is not None:
+        from eggseis.colormaps import LUTS_AVAILABLE
+
+        if cmap not in LUTS_AVAILABLE:
+            raise ValueError(
+                f"@graph_node cmap={cmap!r} not in {LUTS_AVAILABLE}"
+            )
 
     def decorator(func: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
         sig = inspect.signature(func)
@@ -183,72 +204,10 @@ def graph_node(
             vectorized=False,
             deterministic=deterministic,
             kind=kind,
+            cmap=cmap,
         )
         _REGISTRY[spec.id] = spec
         func._eggseis_spec = spec  # type: ignore[attr-defined]
-        return func
-
-    return decorator
-
-
-def plugin(
-    *,
-    name: str,
-    version: str = "0.1.0",
-    inputs: tuple[str, ...] = ("section",),
-    vectorized: bool = False,
-    deterministic: bool = True,
-    kind: Literal["transform", "sink"] = "transform",
-    cmap: str | None = None,
-) -> Callable[[Callable[..., np.ndarray]], Callable[..., np.ndarray]]:
-    """Decorate a function as a named plugin, registered under ``name``.
-
-    This is the recommended high-level decorator. Unlike ``@trace_attribute``
-    and ``@graph_node`` (which key the registry by ``module.func``), this
-    decorator stores the entry under the ``name`` string so it can be looked up
-    by display name.
-
-    ``cmap`` is an optional default colormap name.  It is validated eagerly at
-    decoration time against ``eggseis.colormaps.LUTS_AVAILABLE``; an unknown
-    value raises :class:`PluginRegistrationError`.
-    """
-    if cmap is not None:
-        from eggseis.colormaps import LUTS_AVAILABLE
-
-        if cmap not in LUTS_AVAILABLE:
-            raise PluginRegistrationError(
-                f"@plugin(name={name!r}) cmap={cmap!r} not in {LUTS_AVAILABLE}"
-            )
-
-    def decorator(func: Callable[..., np.ndarray]) -> Callable[..., np.ndarray]:
-        spec = _build_spec(
-            func,
-            name=name,
-            version=version,
-            inputs=inputs,
-            vectorized=vectorized,
-            deterministic=deterministic,
-            kind=kind,
-        )
-        # Replace the auto-generated spec with one that carries cmap.
-        spec_with_cmap = PluginSpec(
-            id=spec.id,
-            name=spec.name,
-            func=spec.func,
-            param_model=spec.param_model,
-            params_decl=spec.params_decl,
-            vectorized=spec.vectorized,
-            deterministic=spec.deterministic,
-            version=spec.version,
-            source_path=spec.source_path,
-            accepts_context=spec.accepts_context,
-            inputs=spec.inputs,
-            output=spec.output,
-            kind=spec.kind,
-            cmap=cmap,
-        )
-        _REGISTRY[name] = spec_with_cmap
-        func._eggseis_spec = spec_with_cmap  # type: ignore[attr-defined]
         return func
 
     return decorator
