@@ -8,13 +8,11 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from eggseis.axes import Axis
 from eggseis.data import SeismicVolume
-from eggseis.viewers.theme import (
-    apply_to_plot_widget,
-    is_dark_mode,
-)
-from eggseis.viewers.theme import (
-    colors as _theme_colors,
-)
+from eggseis.viewers.theme import apply_to_plot_widget
+from eggseis.viewers.theme import colors as _theme_colors
+
+_WELL_MARKER_SIZE = 12
+_WELL_SNAP_RADIUS = 5.0
 
 
 class MapViewWidget(QWidget):
@@ -40,10 +38,9 @@ class MapViewWidget(QWidget):
         self._volume: SeismicVolume | None = None
         c = _theme_colors()
         self._outline = pg.PlotDataItem(pen=pg.mkPen(c["axis"], width=1.5))
-        # Indicator: red works on either background, but lighten in dark mode
-        # so it doesn't blow out against the muted #1e1e1e bg.
-        indicator_color = "#ff5555" if is_dark_mode() else "#ff3333"
-        self._slice_indicator = pg.PlotDataItem(pen=pg.mkPen(indicator_color, width=2))
+        self._slice_indicator = pg.PlotDataItem(
+            pen=pg.mkPen(c["slice_indicator"], width=2)
+        )
         self._plot.addItem(self._outline)
         self._plot.addItem(self._slice_indicator)
 
@@ -106,11 +103,14 @@ class MapViewWidget(QWidget):
 
     def add_well_marker(self, name: str, surface_xy: tuple[float, float]) -> None:
         """Drop or replace a dot at the well's surface_xy on the plan view."""
-        color = "#5c9eff" if is_dark_mode() else "#2566c8"
+        pos = (float(surface_xy[0]), float(surface_xy[1]))
+        if self._well_positions.get(name) == pos:
+            return
+        color = _theme_colors()["well_marker"]
         item = pg.ScatterPlotItem(
-            x=[surface_xy[0]],
-            y=[surface_xy[1]],
-            size=12,
+            x=[pos[0]],
+            y=[pos[1]],
+            size=_WELL_MARKER_SIZE,
             symbol="o",
             brush=color,
             pen=pg.mkPen(color, width=1.5),
@@ -120,7 +120,7 @@ class MapViewWidget(QWidget):
             self._plot.removeItem(prev)
         self._plot.addItem(item)
         self._well_marker_items[name] = item
-        self._well_positions[name] = (float(surface_xy[0]), float(surface_xy[1]))
+        self._well_positions[name] = pos
 
     def remove_well_marker(self, name: str) -> None:
         item = self._well_marker_items.pop(name, None)
@@ -143,7 +143,6 @@ class MapViewWidget(QWidget):
         data_pt = vb.mapSceneToView(pos)
         click_xline = data_pt.x()
         click_inline = data_pt.y()
-        # Snap to nearest well if within 5 grid units (in data coords).
         nearest_name = None
         nearest_dist = float("inf")
         for name, (xl, il) in self._well_positions.items():
@@ -151,9 +150,8 @@ class MapViewWidget(QWidget):
             if d < nearest_dist:
                 nearest_dist = d
                 nearest_name = name
-        if nearest_name is not None and nearest_dist < 5.0:
+        if nearest_name is not None and nearest_dist < _WELL_SNAP_RADIUS:
             _wxl, wil = self._well_positions[nearest_name]
-            # Send the section to the well's inline (default for vertical wells).
             self.sliceRequested.emit("inline", round(wil))
             return
         # Fallback: existing behavior — snap to integer grid, drive section

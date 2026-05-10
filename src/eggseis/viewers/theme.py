@@ -18,6 +18,8 @@ _LIGHT = {
     "grid": "#cccccc",
     "axis": "#404040",
     "warning": "#aa6600",
+    "slice_indicator": "#ff3333",
+    "well_marker": "#2566c8",
 }
 
 _DARK = {
@@ -26,6 +28,8 @@ _DARK = {
     "grid": "#3a3a3a",
     "axis": "#a0a0a0",
     "warning": "#f4a700",
+    "slice_indicator": "#ff5555",
+    "well_marker": "#5c9eff",
 }
 
 

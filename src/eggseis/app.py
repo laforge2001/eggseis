@@ -754,14 +754,13 @@ class MainWindow(QMainWindow):
         project restore) so the overlay is immediately on-screen instead of
         hidden on some unrelated inline.
         """
-        target_inline = round(well.surface_xy[1])
         geom = self.section_viewer.geometry
-        if (
-            geom is not None
-            and geom.inline_min <= target_inline <= geom.inline_max
-        ):
-            self.slice_nav.set_axis_and_index("inline", target_inline)
-        # Drop a marker on the map view too.
+        if geom is None:
+            return
+        target_inline = round(well.surface_xy[1])
+        if not (geom.inline_min <= target_inline <= geom.inline_max):
+            return
+        self.slice_nav.set_axis_and_index("inline", target_inline)
         self.map_view.add_well_marker(well.name, well.surface_xy)
 
     def _on_import_well(self) -> None:
