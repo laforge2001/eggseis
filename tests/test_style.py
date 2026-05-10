@@ -20,9 +20,9 @@ def qapp(qtbot):
 def _reset_style_module():
     """Reset module-global state so tests are order-independent.
 
-    `eggseis.style` keeps `_current_mode` / `_applied_once` at module
-    scope (intentionally — apply_theme is process-singleton). Without
-    this reset, prior tests would leak state into the idempotency test.
+    `eggseis.style` keeps `_current_mode` at module scope
+    (intentionally — apply_theme is process-singleton). Without this
+    reset, prior tests would leak state into the idempotency test.
     Also disconnects any signal handlers attached in prior tests.
     """
     try:
@@ -34,8 +34,7 @@ def _reset_style_module():
 
     import warnings
 
-    _style._current_mode = _style.Theme.DARK
-    _style._applied_once = False
+    _style._current_mode = None
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         try:

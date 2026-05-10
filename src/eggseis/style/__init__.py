@@ -30,17 +30,17 @@ class _ThemeSignals(QObject):
 
 
 theme_signals = _ThemeSignals()
-_current_mode: Theme = Theme.DARK
-_applied_once: bool = False
+_current_mode: Theme | None = None
 
 
 def current_mode() -> Theme:
-    return _current_mode
+    """Return the active theme, defaulting to DARK before first apply."""
+    return _current_mode if _current_mode is not None else Theme.DARK
 
 
 def apply_theme(mode: Theme) -> None:
     """Install pyqtdarktheme + override QSS for `mode`. Idempotent."""
-    global _current_mode, _applied_once
+    global _current_mode
 
     if not isinstance(mode, Theme):
         try:
@@ -49,10 +49,10 @@ def apply_theme(mode: Theme) -> None:
             _log.warning("apply_theme: invalid mode %r; keeping %s", mode, _current_mode)
             return
 
-    if _applied_once and mode is _current_mode:
+    app = QApplication.instance()
+    if mode is _current_mode and app is not None and app.styleSheet():
         return  # already applied; skip duplicate signal
 
-    app = QApplication.instance()
     if app is None:
         _current_mode = mode
         return
@@ -67,17 +67,16 @@ def apply_theme(mode: Theme) -> None:
         _log.warning("qdarktheme setup failed: %s", exc)
 
     _theme.set_active_mode(mode.value)
-    overrides = _load_overrides(mode)
+    overrides = _load_overrides()
     app.setStyleSheet(base_sheet + "\n" + overrides)
 
     _current_mode = mode
-    _applied_once = True
     theme_signals.themeChanged.emit(mode)
 
 
-def _load_overrides(mode: Theme) -> str:
-    """Read the mode's override QSS and substitute palette tokens."""
-    qss_name = f"{mode.value}_overrides.qss"
+def _load_overrides() -> str:
+    """Read the shared override QSS and substitute active-mode palette tokens."""
+    qss_name = "overrides.qss"
     try:
         resource = importlib.resources.files("eggseis.style.qss") / qss_name
         raw = resource.read_text(encoding="utf-8")

@@ -1,4 +1,10 @@
-/* eggseis light overrides — applied on top of pyqtdarktheme light base. */
+/* eggseis override stylesheet — applied on top of pyqtdarktheme base.
+ *
+ * Token substitution: {token_name} placeholders are filled at apply
+ * time from eggseis.viewers.theme.colors(). Literal CSS braces must
+ * be doubled ({{...}}) because we use Python str.format() to
+ * substitute. If the syntax becomes unwieldy, switch to string.Template.
+ */
 
 QSplitter::handle {{
     background: {border};
